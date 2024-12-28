@@ -8,7 +8,8 @@ import { StorageService } from "../services/storage.service/storage.service";
 @Component({
   selector: 'app-creating-game',
   templateUrl: './creating-game.component.html',
-  styleUrls: ['./creating-game.component.css']
+  styleUrls: ['./creating-game.component.css'],
+  standalone: true
 })
 export class CreatingGameComponent {
   gameName="Create Game";
