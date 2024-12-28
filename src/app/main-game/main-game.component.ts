@@ -1,6 +1,6 @@
 import { Component, OnInit, OnChanges, SimpleChanges, Input } from '@angular/core';
-import { UserService } from '../user.service'; 
-import { StorageService } from '../storage.service';
+import { UserService } from "../services/user.service/user.service";
+import { StorageService } from "../services/storage.service/storage.service";
 import { HostListener } from '@angular/core';
 
 
@@ -11,7 +11,7 @@ import { HostListener } from '@angular/core';
 })
 export class MainGameComponent implements OnInit, OnChanges{
   gameName: string | null = "";
-  gameType: string = ''; 
+  gameType: string = '';
   cardList: number[] = [];
   @Input() selectedCard: number = 0;
   lastClickedCard: number | null = null;
@@ -24,7 +24,7 @@ export class MainGameComponent implements OnInit, OnChanges{
   selectedCards: number[] = [];
 
   constructor(private userService: UserService, private storageService: StorageService) {
-   
+
   }
 
   ngOnInit(): void {
@@ -66,23 +66,23 @@ export class MainGameComponent implements OnInit, OnChanges{
   }
   isDropdownOpen = false;
   toggleDropdown(event: MouseEvent): void {
-    event.stopPropagation(); 
+    event.stopPropagation();
     this.isDropdownOpen = !this. isDropdownOpen;
   }
   @HostListener('document:click', ['$event'])
   onClick(event: MouseEvent): void {
-    this.isDropdownOpen = false; 
+    this.isDropdownOpen = false;
   }
-  
+
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['selectedCard']) {
       this.storageService.storeLastClickedCard(this.selectedCard);
     }
 
   }
-  
-  
-  
+
+
+
   onCardClick(card: number): void {
     this.selectedCard = card;
     this.cardsPicked = true;
@@ -96,7 +96,7 @@ export class MainGameComponent implements OnInit, OnChanges{
     this.calculateAverage();
 
   }
-  
+
   updateCountdown(): void {
     setTimeout(() => {
       if (this.countdownValue > 0) {
@@ -107,7 +107,7 @@ export class MainGameComponent implements OnInit, OnChanges{
         this.countdownStarted = false;
         this.countdownInProgress = false;
         this.countdownFinished = true;
-        this.countdownValue = 0; 
+        this.countdownValue = 0;
       }
     }, 800);
   }
