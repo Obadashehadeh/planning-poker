@@ -1,0 +1,142 @@
+<div *ngIf="overlay" class="overlay" id="overlay">
+    <div id="popup" class="pop_up">
+        <!-- Display the login form if display name is not entered -->
+        <div *ngIf="!displayNameEntered" class="login-container">
+            <p class="login-title">Choose your display name</p>
+            <form (ngSubmit)="submitDisplayName()" #displayNameForm="ngForm">  
+                <input type="text" class="login-input" placeholder="Enter Display Name" name="displayName" [(ngModel)]="displayName" required>
+                <button type="submit" class="login-button" id="login_btn">Continue to game</button>
+            </form>
+        </div>
+
+    </div>
+</div>
+<header class="game-name">
+    <img class="poker-logo" src="/assets/poker.jpg" alt="logo">
+    <div class="game-entered">
+        <p>{{gameName}}</p>   
+    </div>
+    <div class="right_section">
+        <div *ngIf="register" class="register">
+            <div class="text_user">
+                <p>Sign up</p>
+            </div>
+            <div class="text_user">
+                <p>Log in </p>
+            </div>
+        </div>
+        <div *ngIf="displayNameEntered" class="user-card" id="userNameDisplay">
+            <div class="user-circle">
+                <p id="userInitial">{{ displayName.charAt(0).toUpperCase() }}</p>
+            </div>
+            <div class="user-header">
+                <h2 id="userName">{{ displayName }}</h2>
+            </div>
+            <div class="dropdown-container">
+                <div class="image-icon" (click)="toggleDropdown($event)">
+                  <img src="/assets/arrow_drop.jpg" alt="arrow list">
+                </div>
+                <div class="dropdown-menu" *ngIf="isDropdownOpen">
+                  <ul>
+                    <li><a href="#">Login</a></li>
+                    <li><a href="#">Sign up</a></li>
+                    <li><a href="#">Sign out</a></li>
+                  </ul>
+                </div>
+              </div>
+        </div>
+        <div class="invitation-box">
+            <img src="/assets/invitation.jpg" alt="invitation">
+            <div class="text">
+                <p>Invite players</p>
+            </div>
+        </div>
+        
+        <div class="issues">
+            <img src="/assets/issues.jpg" alt="issues">
+        </div> 
+    </div>
+</header>
+<!-- middle section-->
+<div class="middle_container">
+    <div class="top_middle" id="topMiddle">  
+        <p>Feeling lonely?</p>
+        <img src="/assets/sleeping_emoji.jpg">
+    </div>
+    <a href="#" class="invitation_middle">Invite players</a>
+    <div id="blue_deck" class="deck">
+        <div class="text_card">
+            <!-- If cards are not revealed, display "Pick your cards!" -->
+            <p *ngIf="!cardsPicked">Pick your cards!</p>
+            <!-- If cards are revealed, display "Reveal cards" button -->
+            <button *ngIf="cardsPicked && !countdownStarted && !countdownFinished" (click)="startCountdown()" class="reveal-button">Reveal cards</button>
+            <span *ngIf="countdownStarted" class="countdown">{{ countdownValue }}</span>
+            <button *ngIf="countdownFinished" (click)="finsihCountdown()" class="newVotingbtn">Start new voting</button>
+
+            
+
+        </div>
+    </div>
+    
+    
+    <div class="picked_card" id="cardPicked" [ngClass]="{'selected': cardsPicked,'revealed': countdownFinished }">
+   <span *ngIf="countdownFinished">{{ selectedCard }}</span>
+    </div>
+
+      
+    
+    <div *ngIf="displayNameEntered" class="user" id="user">
+        <p id="user_name">{{ displayName }}</p>
+    </div>
+</div><!--end of middle section-->
+
+<footer>
+    <div class="beforeReveal" *ngIf="!countdownFinished">
+    <div id="footerContent"> 
+        <div class="bottom_section" id="bottom_sec">
+            <div class="bottom_title">
+                <p>{{ countdownInProgress ? 'Counting votes...' : 'Choose your card' }}</p>
+                <img *ngIf="!countdownInProgress" src="/assets/finger_emoji.png">
+            </div>
+            
+        </div>
+    </div>
+    <div id="cardContainer">
+        <!-- Loop through cardList and display cards -->
+        <div *ngFor="let card of cardList" 
+            class="card" 
+            [class.selected]="selectedCard === card" 
+            [class.countdown-active]="countdownInProgress"
+            (click)="onCardClick(card)">
+            {{ card }}
+        </div>
+    </div>
+    </div>
+    
+
+    <div *ngIf="countdownFinished" class="voting_Results" id="votingResults">
+        <div class="votingleft">
+            <div class="line" id="line">
+            </div>
+            <div class="voted_card" id="voted_card">
+                <p>{{ selectedCard }}</p>
+            </div>
+            <div class="vote_count"><p>1 vote</p></div>    
+            </div>
+        <div class="votingRight">
+            <div class="average">
+                <p>Average:</p>
+                <h1>{{average}}</h1>
+            </div>
+            <div class="Agreement">
+                <p>Agreement:</p>
+                <img src="/assets/agreement.png">
+            </div>
+        </div>
+
+    </div>
+</footer>
+
+
+
+

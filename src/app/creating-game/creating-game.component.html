@@ -1,0 +1,14 @@
+<header class="game-name">
+    <img class="poker-logo" src="/assets/poker.jpg" alt="logo">
+    <p>{{gameName}}</p>
+  </header>
+<form class="creating-game" (ngSubmit)="createGame()">
+    <input class="input-field" id="name" type="text" [formControl]="name" placeholder="Game's name" [value]="'Planning Poker Game'">
+    <div class="dropdown" (click)="toggleDropdown($event)">
+        <input class="input-field" id="votingSystem" type="text" [formControl] ="votingSystem" placeholder="Voting system" [value]="selectedGame">
+        <ul [ngClass]="{'show': showDropdown}">
+            <li *ngFor="let game of gameList" (click)="selectGame(game)">{{ game }}</li>
+        </ul>
+    </div>
+    <button type="submit" class="submit-button">Create game</button>
+</form>
