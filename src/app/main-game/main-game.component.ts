@@ -2,13 +2,14 @@ import { Component, OnInit, OnChanges, SimpleChanges, Input } from '@angular/cor
 import { UserService } from "../services/user.service/user.service";
 import { StorageService } from "../services/storage.service/storage.service";
 import { HostListener } from '@angular/core';
-
-
+import { FormsModule, ReactiveFormsModule  } from '@angular/forms';
+import { CommonModule } from '@angular/common';
 @Component({
   selector: 'app-main-game',
   templateUrl: './main-game.component.html',
   styleUrls: ['./main-game.component.css'],
-  standalone: true
+  standalone: true,
+  imports: [FormsModule,CommonModule,ReactiveFormsModule ]
 })
 export class MainGameComponent implements OnInit, OnChanges{
   gameName: string | null = "";
@@ -127,7 +128,7 @@ export class MainGameComponent implements OnInit, OnChanges{
     const sum = selectedCards.reduce((acc, card) => acc + card, 0);
     const average = selectedCards.length > 0 ? sum / selectedCards.length : 0;
     this.average = parseFloat(average.toFixed(2));
-}
+  }
 
 
 }

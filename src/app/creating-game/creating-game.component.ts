@@ -1,15 +1,20 @@
-import { Component } from '@angular/core';
-import { FormControl } from '@angular/forms';
-import { Router } from '@angular/router';
-import { UserService } from '../services/user.service/user.service';
-import { HostListener } from '@angular/core';
-import { StorageService } from "../services/storage.service/storage.service";
+import {Component, HostListener} from '@angular/core';
+import { CommonModule } from '@angular/common';
+import {FormControl, ReactiveFormsModule} from '@angular/forms';
+import {Router, RouterModule} from '@angular/router';
+import {UserService} from "../services/user.service/user.service";
+import {StorageService} from "../services/storage.service/storage.service";
 
 @Component({
   selector: 'app-creating-game',
   templateUrl: './creating-game.component.html',
   styleUrls: ['./creating-game.component.css'],
-  standalone: true
+  standalone: true,
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    RouterModule
+  ]
 })
 export class CreatingGameComponent {
   gameName="Create Game";
