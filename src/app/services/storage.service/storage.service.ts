@@ -36,5 +36,8 @@ export class StorageService {
   clearStoredCards(): void {
     localStorage.removeItem(this.selectedCardsKey);
   }
+  clearStoredData(): void {
+    localStorage.clear();
+  }
 
 }

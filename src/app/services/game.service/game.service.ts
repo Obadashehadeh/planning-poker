@@ -4,7 +4,7 @@ import { Observable, BehaviorSubject } from 'rxjs';
 @Injectable({
   providedIn: 'root'
 })
-export class UserService {
+export class GameService {
   private gameType: string = '';
   private gameNameSubject: BehaviorSubject<string | null> = new BehaviorSubject<string | null>(null);
   public gameName$: Observable<string | null> = this.gameNameSubject.asObservable();
@@ -12,7 +12,7 @@ export class UserService {
   key: string = 'gameName';
   gameTypeKey: string = 'gameType';
   myGame: string | null = "";
-   
+
   constructor() {
     this.myGame = localStorage.getItem(this.key);
     this.gameNameSubject.next(this.myGame);
@@ -29,13 +29,13 @@ export class UserService {
 
 
   setGameType(gameType: string): void {
-    localStorage.setItem(this.gameTypeKey, gameType); 
-    this.gameType = gameType; 
+    localStorage.setItem(this.gameTypeKey, gameType);
+    this.gameType = gameType;
   }
 
   getGameType(): string {
     return this.gameType;
   }
 
-  
+
 }

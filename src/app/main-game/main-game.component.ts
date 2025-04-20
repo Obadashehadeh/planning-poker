@@ -1,89 +1,97 @@
-import { Component, OnInit, OnChanges, SimpleChanges, Input } from '@angular/core';
-import { UserService } from "../services/user.service/user.service";
-import { StorageService } from "../services/storage.service/storage.service";
-import { HostListener } from '@angular/core';
-import { FormsModule, ReactiveFormsModule  } from '@angular/forms';
+import { Component, OnInit, OnChanges, SimpleChanges, Input, HostListener } from '@angular/core';
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
+import * as XLSX from 'xlsx';
+
+import { GameService } from '../services/game.service/game.service';
+import { StorageService } from '../services/storage.service/storage.service';
+import { InvitationService } from '../services/invitation.service';
+import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
+
 @Component({
   selector: 'app-main-game',
   templateUrl: './main-game.component.html',
   styleUrls: ['./main-game.component.css'],
   standalone: true,
-  imports: [FormsModule,CommonModule,ReactiveFormsModule ]
+  imports: [FormsModule, CommonModule, ReactiveFormsModule, InvitationModalComponent],
 })
-export class MainGameComponent implements OnInit, OnChanges{
-  gameName: string | null = "";
+export class MainGameComponent implements OnInit, OnChanges {
+  @Input() selectedCard: number = 0;
+  gameName: string | null = '';
   gameType: string = '';
   cardList: number[] = [];
-  @Input() selectedCard: number = 0;
   lastClickedCard: number | null = null;
   cardsPicked: boolean = false;
   countdownStarted: boolean = false;
   countdownValue: number = 2;
   countdownInProgress: boolean = false;
   countdownFinished: boolean = false;
-  average: number =0;
+  average: number = 0;
   selectedCards: number[] = [];
-
-  constructor(private userService: UserService, private storageService: StorageService) {
-
+  showModal: boolean = false;
+  isSidebarOpen: boolean = false;
+  uploadedData: any[] = [];
+  displayNameEntered: boolean = false;
+  displayName: string = '';
+  register: boolean = true;
+  overlay: boolean = true;
+  isDropdownOpen: boolean = false;
+  isModalVisible: boolean = false;
+  isOpenInvitationModal = false;
+  constructor(
+    private gameService: GameService,
+    private storageService: StorageService,
+    private invitationService: InvitationService,
+    private router: Router
+  ) {
+    this.invitationService.getInvitationStatus().subscribe((status) => {
+      this.showModal = status;
+    });
+    this.gameService.gameName$.subscribe((gameName) => {
+      this.gameName = gameName;
+    });
   }
 
   ngOnInit(): void {
-    this.userService.gameName$.subscribe(gameName => {
-      this.gameName = gameName;
-    });
-    this.gameType = this.userService.getGameType();
+
+
+    this.gameType = this.gameService.getGameType();
     const storedDisplayName = this.storageService.getDisplayName();
     if (storedDisplayName) {
       this.displayNameEntered = true;
+      this.register = false;
+      this.overlay = false;
       this.displayName = storedDisplayName;
-      this.register = false;
-      this.overlay = false;
     }
 
-    if (this.gameType.includes('Fibonacci')) {
-      this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
-    } else if (this.gameType.includes('Numbers 1-15')) {
-      this.cardList = Array.from({ length: 15 }, (_, i) => i + 1);
-    } else if (this.gameType.includes('Powers of 2')) {
-      this.cardList = [0, 1, 2, 4, 8, 16, 32, 64];
-    }
-  }
-
-
-
-  displayNameEntered = false;
-  displayName: string = '';
-  register = true;
-  overlay = true;
-  submitDisplayName(): void {
-    if (this.displayName.trim() !== '') {
-      this.displayNameEntered = true;
-      this.register = false;
-      this.overlay = false;
-      // Store display name in the storage service
-      this.storageService.setDisplayName(this.displayName);
-    }
-  }
-  isDropdownOpen = false;
-  toggleDropdown(event: MouseEvent): void {
-    event.stopPropagation();
-    this.isDropdownOpen = !this. isDropdownOpen;
-  }
-  @HostListener('document:click', ['$event'])
-  onClick(event: MouseEvent): void {
-    this.isDropdownOpen = false;
+    this.initializeCardList();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['selectedCard']) {
       this.storageService.storeLastClickedCard(this.selectedCard);
     }
-
   }
 
+  submitDisplayName(): void {
+    if (this.displayName.trim() !== '') {
+      this.displayNameEntered = true;
+      this.register = false;
+      this.overlay = false;
+      this.storageService.setDisplayName(this.displayName);
+    }
+  }
 
+  toggleDropdown(event: MouseEvent): void {
+    event.stopPropagation();
+    this.isDropdownOpen = !this.isDropdownOpen;
+  }
+
+  @HostListener('document:click', ['$event'])
+  onClick(): void {
+    this.isDropdownOpen = false;
+  }
 
   onCardClick(card: number): void {
     this.selectedCard = card;
@@ -96,7 +104,6 @@ export class MainGameComponent implements OnInit, OnChanges{
     this.updateCountdown();
     this.storageService.storeLastClickedCard(this.selectedCard);
     this.calculateAverage();
-
   }
 
   updateCountdown(): void {
@@ -105,7 +112,6 @@ export class MainGameComponent implements OnInit, OnChanges{
         this.countdownValue--;
         this.updateCountdown();
       } else {
-        // Countdown finished
         this.countdownStarted = false;
         this.countdownInProgress = false;
         this.countdownFinished = true;
@@ -114,14 +120,12 @@ export class MainGameComponent implements OnInit, OnChanges{
     }, 800);
   }
 
-  finsihCountdown(): void{
+  finishCountdown(): void {
     this.countdownStarted = false;
     this.countdownInProgress = false;
     this.countdownFinished = true;
     location.reload();
   }
-
-  selectedCardsKey = 'selectedCards';
 
   calculateAverage(): void {
     const selectedCards: number[] = this.storageService.getStoredCards();
@@ -130,5 +134,52 @@ export class MainGameComponent implements OnInit, OnChanges{
     this.average = parseFloat(average.toFixed(2));
   }
 
+  invitePlayer(): void {
+    this.invitationService.triggerInvitation();
+    this.isOpenInvitationModal = true;
+  }
 
+  toggleSidebar(): void {
+    this.isSidebarOpen = !this.isSidebarOpen;
+  }
+
+  onFileChange(event: any): void {
+    const target: DataTransfer = <DataTransfer>event.target;
+    if (target.files.length !== 1) {
+      console.error('Cannot upload multiple files at once.');
+      return;
+    }
+
+    const file: File = target.files[0];
+    const reader: FileReader = new FileReader();
+
+    reader.onload = (e: any) => {
+      const binaryData: string = e.target.result;
+      const workbook: XLSX.WorkBook = XLSX.read(binaryData, { type: 'binary' });
+      const sheetName: string = workbook.SheetNames[0];
+      const sheetData: XLSX.WorkSheet = workbook.Sheets[sheetName];
+      this.uploadedData = XLSX.utils.sheet_to_json(sheetData);
+    };
+    console.log(this.uploadedData)
+    reader.readAsBinaryString(file);
+  }
+
+  private initializeCardList(): void {
+    if (this.gameType.includes('Fibonacci')) {
+      this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
+    } else if (this.gameType.includes('Numbers 1-15')) {
+      this.cardList = Array.from({ length: 15 }, (_, i) => i + 1);
+    } else if (this.gameType.includes('Powers of 2')) {
+      this.cardList = [0, 1, 2, 4, 8, 16, 32, 64];
+    }
+  }
+
+  protected readonly Object = Object;
+  closeModel() {
+    this.isOpenInvitationModal = false;
+  }
+  logout(): void {
+    this.storageService.clearStoredData();
+    this.router.navigate(['./']);
+  }
 }

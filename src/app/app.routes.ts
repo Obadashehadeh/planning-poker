@@ -9,7 +9,7 @@ export const appRoutes: Routes = [
     )
   },
   {
-    path: '',
+    path: 'main-game',
     loadComponent: () => import
       ('./main-game/main-game.component').then(
       m => m.MainGameComponent

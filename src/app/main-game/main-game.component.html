@@ -1,142 +1,187 @@
 <div *ngIf="overlay" class="overlay" id="overlay">
-    <div id="popup" class="pop_up">
-        <!-- Display the login form if display name is not entered -->
-        <div *ngIf="!displayNameEntered" class="login-container">
-            <p class="login-title">Choose your display name</p>
-            <form (ngSubmit)="submitDisplayName()" #displayNameForm="ngForm">  
-                <input type="text" class="login-input" placeholder="Enter Display Name" name="displayName" [(ngModel)]="displayName" required>
-                <button type="submit" class="login-button" id="login_btn">Continue to game</button>
-            </form>
-        </div>
-
+  <div id="popup" class="pop_up">
+    <div *ngIf="!displayNameEntered" class="login-container">
+      <p class="login-title">Choose your display name</p>
+      <form (ngSubmit)="submitDisplayName()" #displayNameForm="ngForm">
+        <input
+          type="text"
+          class="login-input"
+          placeholder="Enter Display Name"
+          name="displayName"
+          [(ngModel)]="displayName"
+          required
+        />
+        <button type="submit" class="login-button" id="login_btn">
+          Continue to game
+        </button>
+      </form>
     </div>
+  </div>
 </div>
 <header class="game-name">
-    <img class="poker-logo" src="/assets/poker.jpg" alt="logo">
-    <div class="game-entered">
-        <p>{{gameName}}</p>   
+  <img class="poker-logo" src="/assets/blulogix.logo.png" alt="logo" />
+  <div class="game-entered">
+    <p>{{ gameName }}</p>
+  </div>
+  <div class="right_section">
+    <div *ngIf="register" class="register">
+      <div class="text_user">
+        <p>Sign up</p>
+      </div>
+      <div class="text_user">
+        <p>Log in</p>
+      </div>
     </div>
-    <div class="right_section">
-        <div *ngIf="register" class="register">
-            <div class="text_user">
-                <p>Sign up</p>
-            </div>
-            <div class="text_user">
-                <p>Log in </p>
-            </div>
+    <div *ngIf="displayNameEntered" class="user-card" id="userNameDisplay" (click)="toggleDropdown($event)">
+      <div class="user-circle">
+        <p id="userInitial">{{ displayName.charAt(0).toUpperCase() }}</p>
+      </div>
+      <div class="user-header">
+        <h2 id="userName">{{ displayName }}</h2>
+      </div>
+      <div class="dropdown-container">
+        <div class="image-icon">
+          <img src="/assets/arrow_drop.jpg" alt="arrow list" />
         </div>
-        <div *ngIf="displayNameEntered" class="user-card" id="userNameDisplay">
-            <div class="user-circle">
-                <p id="userInitial">{{ displayName.charAt(0).toUpperCase() }}</p>
-            </div>
-            <div class="user-header">
-                <h2 id="userName">{{ displayName }}</h2>
-            </div>
-            <div class="dropdown-container">
-                <div class="image-icon" (click)="toggleDropdown($event)">
-                  <img src="/assets/arrow_drop.jpg" alt="arrow list">
-                </div>
-                <div class="dropdown-menu" *ngIf="isDropdownOpen">
-                  <ul>
-                    <li><a href="#">Login</a></li>
-                    <li><a href="#">Sign up</a></li>
-                    <li><a href="#">Sign out</a></li>
-                  </ul>
-                </div>
-              </div>
+        <div class="dropdown-menu" *ngIf="isDropdownOpen">
+          <ul>
+<!--            <li><a href="#">Login</a></li>-->
+<!--            <li><a href="#">Sign up</a></li>-->
+            <li><a href="#" (click)="logout()">Sign out</a></li>
+          </ul>
         </div>
-        <div class="invitation-box">
-            <img src="/assets/invitation.jpg" alt="invitation">
-            <div class="text">
-                <p>Invite players</p>
-            </div>
-        </div>
-        
-        <div class="issues">
-            <img src="/assets/issues.jpg" alt="issues">
-        </div> 
+      </div>
     </div>
+    <div class="invitation-box">
+      @if (isOpenInvitationModal) {
+        <app-invitation-modal [isVisible]="showModal" (closeModal)="closeModel()" ></app-invitation-modal>
+      }
+      <img src="/assets/invitation.jpg" alt="invitation" />
+      <div class="text">
+        <p (click)="invitePlayer()">Invite players</p>
+      </div>
+    </div>
+
+    <div class="issues" (click)="toggleSidebar()">
+      <img src="/assets/issues.jpg" alt="issues" />
+    </div>
+  </div>
 </header>
-<!-- middle section-->
+<div class="sidebar" [ngClass]="{ open: isSidebarOpen }">
+  <div class="sidebar-header">
+    <h2>Issues</h2>
+    <button class="close-btn" (click)="toggleSidebar()">X</button>
+  </div>
+  <div class="sidebar-content">
+<!--    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">-->
+<!--      <path-->
+<!--        d="M288 109.3L288 352c0 17.7-14.3 32-32 32s-32-14.3-32-32l0-242.7-73.4 73.4c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l128-128c12.5-12.5 32.8-12.5 45.3 0l128 128c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L288 109.3zM64 352l128 0c0 35.3 28.7 64 64 64s64-28.7 64-64l128 0c35.3 0 64 28.7 64 64l0 32c0 35.3-28.7 64-64 64L64 512c-35.3 0-64-28.7-64-64l0-32c0-35.3 28.7-64 64-64zM432 456a24 24 0 1 0 0-48 24 24 0 1 0 0 48z"-->
+<!--      />-->
+<!--    </svg>-->
+<!--    <p>Upload Issues from Excel</p>-->
+    <input
+      type="file"
+      id="fileUpload"
+      (change)="onFileChange($event)"
+      accept=".xlsx, .xls"
+    />
+  </div>
+  <div *ngIf="uploadedData.length > 0" class="data-table">
+    <table>
+      <thead>
+      <tr>
+        <th *ngFor="let header of Object.keys(uploadedData[0])">
+          {{ header }}
+        </th>
+      </tr>
+      </thead>
+      <tbody>
+      <tr *ngFor="let row of uploadedData">
+        <td *ngFor="let cell of Object.values(row)">{{ cell }}</td>
+      </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
 <div class="middle_container">
-    <div class="top_middle" id="topMiddle">  
-        <p>Feeling lonely?</p>
-        <img src="/assets/sleeping_emoji.jpg">
+<!--  <div class="top_middle" id="topMiddle">-->
+<!--    <p>Feeling lonely?</p>-->
+<!--    <img src="/assets/sleeping_emoji.jpg" />-->
+<!--  </div>-->
+<!--  <a href="#" class="invitation_middle">Invite players</a>-->
+  <div id="blue_deck" class="deck">
+    <div class="text_card">
+      <p *ngIf="!cardsPicked">Pick your cards!</p>
+      <button
+        *ngIf="cardsPicked && !countdownStarted && !countdownFinished"
+        (click)="startCountdown()"
+        class="reveal-button"
+      >
+        Reveal cards
+      </button>
+      <span *ngIf="countdownStarted" class="countdown">{{ countdownValue }}</span>
+      <button
+        *ngIf="countdownFinished"
+        (click)="finishCountdown()"
+        class="newVotingbtn"
+      >
+        Start new voting
+      </button>
     </div>
-    <a href="#" class="invitation_middle">Invite players</a>
-    <div id="blue_deck" class="deck">
-        <div class="text_card">
-            <!-- If cards are not revealed, display "Pick your cards!" -->
-            <p *ngIf="!cardsPicked">Pick your cards!</p>
-            <!-- If cards are revealed, display "Reveal cards" button -->
-            <button *ngIf="cardsPicked && !countdownStarted && !countdownFinished" (click)="startCountdown()" class="reveal-button">Reveal cards</button>
-            <span *ngIf="countdownStarted" class="countdown">{{ countdownValue }}</span>
-            <button *ngIf="countdownFinished" (click)="finsihCountdown()" class="newVotingbtn">Start new voting</button>
-
-            
-
-        </div>
-    </div>
-    
-    
-    <div class="picked_card" id="cardPicked" [ngClass]="{'selected': cardsPicked,'revealed': countdownFinished }">
-   <span *ngIf="countdownFinished">{{ selectedCard }}</span>
-    </div>
-
-      
-    
-    <div *ngIf="displayNameEntered" class="user" id="user">
-        <p id="user_name">{{ displayName }}</p>
-    </div>
-</div><!--end of middle section-->
-
+  </div>
+  <div
+    class="picked_card"
+    id="cardPicked"
+    [ngClass]="{ selected: cardsPicked, revealed: countdownFinished }"
+  >
+    <span *ngIf="countdownFinished">{{ selectedCard }}</span>
+  </div>
+  <div *ngIf="displayNameEntered" class="user" id="user">
+    <p id="user_name">{{ displayName }}</p>
+  </div>
+</div>
 <footer>
-    <div class="beforeReveal" *ngIf="!countdownFinished">
-    <div id="footerContent"> 
-        <div class="bottom_section" id="bottom_sec">
-            <div class="bottom_title">
-                <p>{{ countdownInProgress ? 'Counting votes...' : 'Choose your card' }}</p>
-                <img *ngIf="!countdownInProgress" src="/assets/finger_emoji.png">
-            </div>
-            
+  <div class="beforeReveal" *ngIf="!countdownFinished">
+    <div id="footerContent">
+      <div class="bottom_section" id="bottom_sec">
+        <div class="bottom_title">
+          <p>
+            {{ countdownInProgress ? 'Counting votes...' : 'Choose your card' }}
+          </p>
         </div>
+      </div>
     </div>
     <div id="cardContainer">
-        <!-- Loop through cardList and display cards -->
-        <div *ngFor="let card of cardList" 
-            class="card" 
-            [class.selected]="selectedCard === card" 
-            [class.countdown-active]="countdownInProgress"
-            (click)="onCardClick(card)">
-            {{ card }}
-        </div>
+      <div
+        *ngFor="let card of cardList"
+        class="card"
+        [class.selected]="selectedCard === card"
+        [class.countdown-active]="countdownInProgress"
+        (click)="onCardClick(card)"
+      >
+        {{ card }}
+      </div>
     </div>
+  </div>
+  <div *ngIf="countdownFinished" class="voting_Results" id="votingResults">
+    <div class="votingleft">
+      <div class="line" id="line"></div>
+      <div class="voted_card" id="voted_card">
+        <p>{{ selectedCard }}</p>
+      </div>
+      <div class="vote_count">
+        <p>1 vote</p>
+      </div>
     </div>
-    
-
-    <div *ngIf="countdownFinished" class="voting_Results" id="votingResults">
-        <div class="votingleft">
-            <div class="line" id="line">
-            </div>
-            <div class="voted_card" id="voted_card">
-                <p>{{ selectedCard }}</p>
-            </div>
-            <div class="vote_count"><p>1 vote</p></div>    
-            </div>
-        <div class="votingRight">
-            <div class="average">
-                <p>Average:</p>
-                <h1>{{average}}</h1>
-            </div>
-            <div class="Agreement">
-                <p>Agreement:</p>
-                <img src="/assets/agreement.png">
-            </div>
-        </div>
-
+    <div class="votingRight">
+      <div class="average">
+        <p>Average:</p>
+        <h1>{{ average }}</h1>
+      </div>
+      <div class="Agreement">
+        <p>Agreement:</p>
+        <img src="/assets/agreement.png" />
+      </div>
     </div>
+  </div>
 </footer>
-
-
-
-
