@@ -1,4 +1,4 @@
-import {Component, HostListener} from '@angular/core';
+import {Component, HostListener, OnInit} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {FormControl, FormsModule, ReactiveFormsModule} from '@angular/forms';
 import {Router, RouterModule} from '@angular/router';
@@ -17,7 +17,7 @@ import {StorageService} from "../services/storage.service/storage.service";
     FormsModule
   ]
 })
-export class CreatingGameComponent {
+export class CreatingGameComponent implements OnInit {
   gameName="Create Game";
   name = new FormControl('');
   votingSystem = new FormControl("");
@@ -30,7 +30,10 @@ export class CreatingGameComponent {
   selectedGame: string = "";
 
   constructor(private router: Router, private gameService: GameService, private storageService: StorageService) {}
-
+  ngOnInit () {
+    this.selectedGame = this.selectedGame === "" ? this.gameList[0]: this.selectedGame;
+    this.votingSystem.setValue(this.selectedGame);
+  }
   toggleDropdown(event: MouseEvent): void {
     event.stopPropagation();
     this.showDropdown = !this.showDropdown;
@@ -42,7 +45,6 @@ export class CreatingGameComponent {
   }
 
   createGame(): void {
-    debugger
     const gameName = this.name.value || 'planning poker game';
     const gameType = this.selectedGame;
 

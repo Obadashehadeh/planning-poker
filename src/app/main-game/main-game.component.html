@@ -67,57 +67,59 @@
     </div>
   </div>
 </header>
-<div class="sidebar" [ngClass]="{ open: isSidebarOpen }">
-  <div class="sidebar-header">
+<aside class="sidebar" [ngClass]="{ open: isSidebarOpen }">
+  <header class="sidebar-header">
     <h2>Issues</h2>
-    <button class="close-btn" (click)="toggleSidebar()">X</button>
-  </div>
+    <button class="close-btn" (click)="toggleSidebar()">
+        <svg class="cancel-button"
+             xmlns="http://www.w3.org/2000/svg"
+             x="0px"
+             y="0px"
+             width="100"
+             height="100"
+             viewBox="0 0 16 16">
+          <path
+            d="M 2.75 2.042969 L 2.042969 2.75 L 2.398438 3.101563 L 7.292969 8 L 2.042969 13.25 L 2.75 13.957031 L 8 8.707031 L 12.894531 13.605469 L 13.25 13.957031 L 13.957031 13.25 L 13.605469 12.894531 L 8.707031 8 L 13.957031 2.75 L 13.25 2.042969 L 8 7.292969 L 3.101563 2.398438 Z">
+          </path>
+      </svg>
+    </button>
+  </header>
   <div class="sidebar-content">
-<!--    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">-->
-<!--      <path-->
-<!--        d="M288 109.3L288 352c0 17.7-14.3 32-32 32s-32-14.3-32-32l0-242.7-73.4 73.4c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3l128-128c12.5-12.5 32.8-12.5 45.3 0l128 128c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L288 109.3zM64 352l128 0c0 35.3 28.7 64 64 64s64-28.7 64-64l128 0c35.3 0 64 28.7 64 64l0 32c0 35.3-28.7 64-64 64L64 512c-35.3 0-64-28.7-64-64l0-32c0-35.3 28.7-64 64-64zM432 456a24 24 0 1 0 0-48 24 24 0 1 0 0 48z"-->
-<!--      />-->
-<!--    </svg>-->
-<!--    <p>Upload Issues from Excel</p>-->
     <input
       type="file"
       id="fileUpload"
       (change)="onFileChange($event)"
-      accept=".xlsx, .xls"
-    />
+      accept=".xlsx, .xls"/>
   </div>
-  <div *ngIf="uploadedData.length > 0" class="data-table">
+  <body *ngIf="specificData.length > 0" class="data-table">
     <table>
       <thead>
-      <tr>
-        <th *ngFor="let header of Object.keys(uploadedData[0])">
-          {{ header }}
-        </th>
-      </tr>
+        <tr>
+          <th *ngFor="let header of expectedColumns">{{ header }}</th>
+        </tr>
       </thead>
       <tbody>
-      <tr *ngFor="let row of uploadedData">
-        <td *ngFor="let cell of Object.values(row)">{{ cell }}</td>
-      </tr>
+        <tr *ngFor="let row of specificData" class="hover-row">
+          <td *ngFor="let header of expectedColumns">
+            {{  row[header]  }}
+          </td>
+          <td class="action-buttons">
+            <button class="action-btn edit" (click)="setSelectVotingTicket(row)">Vote</button>
+<!--            <button class="action-btn delete" (click)="selectEstimated(row)">Select Estimate</button>-->
+          </td>
+        </tr>
       </tbody>
     </table>
-  </div>
-</div>
+  </body>
+</aside>
 <div class="middle_container">
-<!--  <div class="top_middle" id="topMiddle">-->
-<!--    <p>Feeling lonely?</p>-->
-<!--    <img src="/assets/sleeping_emoji.jpg" />-->
-<!--  </div>-->
-<!--  <a href="#" class="invitation_middle">Invite players</a>-->
   <div id="blue_deck" class="deck">
     <div class="text_card">
       <p *ngIf="!cardsPicked">Pick your cards!</p>
       <button
         *ngIf="cardsPicked && !countdownStarted && !countdownFinished"
         (click)="startCountdown()"
-        class="reveal-button"
-      >
-        Reveal cards
+        class="reveal-button"> Reveal cards
       </button>
       <span *ngIf="countdownStarted" class="countdown">{{ countdownValue }}</span>
       <button
@@ -145,7 +147,8 @@
     <div id="footerContent">
       <div class="bottom_section" id="bottom_sec">
         <div class="bottom_title">
-          <p>
+          <p  *ngIf="selectedTicket">Voting {{selectedTicket.Key}} Ticket</p>
+          <p *ngIf="!selectedTicket">
             {{ countdownInProgress ? 'Counting votes...' : 'Choose your card' }}
           </p>
         </div>
@@ -157,7 +160,7 @@
         class="card"
         [class.selected]="selectedCard === card"
         [class.countdown-active]="countdownInProgress"
-        (click)="onCardClick(card)"
+        (click)="selectedTicket ? onCardClick(card): null"
       >
         {{ card }}
       </div>
@@ -168,9 +171,6 @@
       <div class="line" id="line"></div>
       <div class="voted_card" id="voted_card">
         <p>{{ selectedCard }}</p>
-      </div>
-      <div class="vote_count">
-        <p>1 vote</p>
       </div>
     </div>
     <div class="votingRight">

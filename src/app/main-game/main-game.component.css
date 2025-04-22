@@ -1,4 +1,7 @@
-
+/*.creating-game {*/
+/*  min-height: 100vh;*/
+/*  min-width: 100vw;*/
+/*}*/
 .overlay {
     position: fixed;
     top: 0;
@@ -584,18 +587,20 @@
 .sidebar {
   position: fixed;
   top: 0;
-  right: -300px; /* Hidden by default */
-  width: 300px;
+  right: -35em; /* Hidden by default */
+  width: 35em;
   height: 100%;
   background-color: #fff;
   box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
   transition: right 0.3s ease;
   z-index: 1000;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
 .sidebar.open {
-  right: 0; /* Visible when open */
+  right: 0;
+  border-radius: 5px;
 }
 
 .sidebar-header {
@@ -615,12 +620,11 @@
 .close-btn {
   background: none;
   border: none;
-  font-size: 18px;
   cursor: pointer;
 }
 svg {
-  width: 20px;
-  padding-right: 30px;
+  width: 1.5em;
+  height: fit-content;
 }
 .upload-container {
   margin: 20px 0;
@@ -641,7 +645,9 @@ svg {
 #fileUpload {
   display: block;
 }
-
+.data-table {
+  overflow-x: auto;
+}
 .data-table table {
   width: 100%;
   border-collapse: collapse;
@@ -649,13 +655,53 @@ svg {
 }
 
 .data-table th, .data-table td {
-  border: 1px solid #ddd;
+  /*border: 1px solid #ddd;*/
   padding: 8px;
   text-align: left;
+  min-width: 5em;
 }
 
 .data-table th {
   background-color: #f4f4f4;
   font-weight: bold;
 }
+.hover-row {
+  position: relative;
+}
+
+.action-buttons {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  gap: 5px;
+}
+
+.hover-row:hover .action-buttons {
+  display: flex;
+}
+
+.action-btn {
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  transition: background 0.2s;
+}
+
+.action-btn:hover {
+  background: #f0f0f0;
+}
+
+.edit {
+  color: green;
+}
+
+.delete {
+  color: red;
+}
+
 

@@ -31,7 +31,9 @@ export class MainGameComponent implements OnInit, OnChanges {
   selectedCards: number[] = [];
   showModal: boolean = false;
   isSidebarOpen: boolean = false;
+  specificData: any[] = [];
   uploadedData: any[] = [];
+  expectedColumns: string[] = ["Key","Summary","Status","Assignee","Story point estimate"];
   displayNameEntered: boolean = false;
   displayName: string = '';
   register: boolean = true;
@@ -39,6 +41,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   isDropdownOpen: boolean = false;
   isModalVisible: boolean = false;
   isOpenInvitationModal = false;
+  selectedTicket: any = null;
   constructor(
     private gameService: GameService,
     private storageService: StorageService,
@@ -47,9 +50,6 @@ export class MainGameComponent implements OnInit, OnChanges {
   ) {
     this.invitationService.getInvitationStatus().subscribe((status) => {
       this.showModal = status;
-    });
-    this.gameService.gameName$.subscribe((gameName) => {
-      this.gameName = gameName;
     });
   }
 
@@ -64,7 +64,9 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.overlay = false;
       this.displayName = storedDisplayName;
     }
-
+    this.gameService.gameName$.subscribe((gameName) => {
+      this.gameName = gameName;
+    });
     this.initializeCardList();
   }
 
@@ -132,6 +134,7 @@ export class MainGameComponent implements OnInit, OnChanges {
     const sum = selectedCards.reduce((acc, card) => acc + card, 0);
     const average = selectedCards.length > 0 ? sum / selectedCards.length : 0;
     this.average = parseFloat(average.toFixed(2));
+    this.setStoryPoint(this.average);
   }
 
   invitePlayer(): void {
@@ -157,13 +160,18 @@ export class MainGameComponent implements OnInit, OnChanges {
       const binaryData: string = e.target.result;
       const workbook: XLSX.WorkBook = XLSX.read(binaryData, { type: 'binary' });
       const sheetName: string = workbook.SheetNames[0];
-      const sheetData: XLSX.WorkSheet = workbook.Sheets[sheetName];
-      this.uploadedData = XLSX.utils.sheet_to_json(sheetData);
+      const sheet = workbook.Sheets[sheetName];
+      this.uploadedData = XLSX.utils.sheet_to_json(sheet);
+      this.specificData = this.uploadedData.map((row: any) => {
+        const filteredRow: any = {};
+        this.expectedColumns.forEach(col => {
+          filteredRow[col] = row[col] ?? '';
+        });
+        return filteredRow;
+      });
     };
-    console.log(this.uploadedData)
     reader.readAsBinaryString(file);
   }
-
   private initializeCardList(): void {
     if (this.gameType.includes('Fibonacci')) {
       this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
@@ -180,6 +188,13 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
   logout(): void {
     this.storageService.clearStoredData();
-    this.router.navigate(['./']);
+    sessionStorage.clear();
+    this.router.navigate(['/']);
+  }
+  setSelectVotingTicket(row: any) {
+    this.selectedTicket = row;
+  }
+  setStoryPoint(average:number) {
+    this.selectedTicket['Story point estimate'] = average;
   }
 }
