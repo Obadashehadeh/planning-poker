@@ -46,7 +46,7 @@
 
 .login-button {
     display: block;
-    width: 470px;
+    width: 100%;
     padding: 10px 15px;
     background-color: #545afb;
     color: #fff;

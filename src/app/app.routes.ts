@@ -2,7 +2,7 @@ import { Routes } from '@angular/router';
 
 export const appRoutes: Routes = [
   {
-    path: '',
+    path: 'create-game',
     loadComponent: () => import
       ('./creating-game/creating-game.component').then(
       m => m.CreatingGameComponent
@@ -15,4 +15,9 @@ export const appRoutes: Routes = [
       m => m.MainGameComponent
     )
   },
+  {
+    path: '**',
+    redirectTo: 'create-game',
+  },
+
 ];

@@ -54,8 +54,6 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   ngOnInit(): void {
-
-
     this.gameType = this.gameService.getGameType();
     const storedDisplayName = this.storageService.getDisplayName();
     if (storedDisplayName) {
@@ -67,6 +65,7 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.gameService.gameName$.subscribe((gameName) => {
       this.gameName = gameName;
     });
+    this.submitDisplayName();
     this.initializeCardList();
   }
 
@@ -189,7 +188,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   logout(): void {
     this.storageService.clearStoredData();
     sessionStorage.clear();
-    this.router.navigate(['/']);
+    this.router.navigate(['/create-game']);
   }
   setSelectVotingTicket(row: any) {
     this.selectedTicket = row;
