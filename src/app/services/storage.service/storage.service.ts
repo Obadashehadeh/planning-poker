@@ -1,11 +1,20 @@
 import { Injectable } from '@angular/core';
 
+interface JiraTicket {
+  Key: string;
+  Summary: string;
+  Status: string;
+  Assignee: string;
+  'Story point': number | string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class StorageService {
   private displayNameKey = 'displayName';
-  selectedCardsKey = 'selectedCards';
+  private selectedCardsKey = 'selectedCards';
+  private ticketsKey = 'jiraTickets';
 
   constructor() { }
 
@@ -24,20 +33,35 @@ export class StorageService {
     const selectedCards: number[] = JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
     selectedCards.push(card);
     localStorage.setItem(this.selectedCardsKey, JSON.stringify(selectedCards));
-
   }
 
-  // Retrieve all stored cards
   getStoredCards(): number[] {
     return JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
   }
 
-  // Clear stored cards
   clearStoredCards(): void {
     localStorage.removeItem(this.selectedCardsKey);
   }
+
+  storeTickets(tickets: JiraTicket[]): void {
+    localStorage.setItem(this.ticketsKey, JSON.stringify(tickets));
+  }
+
+  getStoredTickets(): JiraTicket[] {
+    return JSON.parse(localStorage.getItem(this.ticketsKey) || '[]');
+  }
+
+  updateTicketStoryPoints(ticketKey: string, storyPoints: number): void {
+    const tickets = this.getStoredTickets();
+    const ticketIndex = tickets.findIndex(t => t.Key === ticketKey);
+
+    if (ticketIndex !== -1) {
+      tickets[ticketIndex]['Story point'] = storyPoints;
+      this.storeTickets(tickets);
+    }
+  }
+
   clearStoredData(): void {
     localStorage.clear();
   }
-
 }

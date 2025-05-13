@@ -1,16 +1,45 @@
-<!--<div class="creating-game">-->
-  <header class="game-name">
-      <img class="poker-logo" src="/assets/blulogix.logo.png" alt="logo">
-      <p>{{gameName}}</p>
+<div class="create-game-container">
+  <header class="game-header">
+    <img class="poker-logo" src="/assets/blulogix.logo.png" alt="logo">
+    <h1>{{gameName}}</h1>
   </header>
-  <form class="creating-game" (ngSubmit)="createGame()">
-      <input class="input-field" id="name" type="text" [formControl]="name" placeholder="Game's name" [value]="''">
-      <div class="dropdown" (click)="toggleDropdown($event)" >
-          <input class="input-field" id="votingSystem" type="text" [formControl] ="votingSystem" placeholder="Voting system" [value]="selectedGame">
-          <ul [ngClass]="{'show': showDropdown}">
-              <li *ngFor="let game of gameList" (click)="selectGame(game)">{{ game }}</li>
-          </ul>
+
+  <form class="create-game-form" (ngSubmit)="createGame()">
+    <div class="form-group">
+      <label for="name">Game Name</label>
+      <input
+        class="form-input"
+        id="name"
+        type="text"
+        [formControl]="name"
+        placeholder="Enter your game's name">
+    </div>
+
+    <div class="form-group">
+      <label for="votingSystem">Voting System</label>
+      <div class="dropdown" (click)="toggleDropdown($event)">
+        <div class="select-container">
+          <input
+            class="form-input"
+            id="votingSystem"
+            type="text"
+            [formControl]="votingSystem"
+            placeholder="Select voting system"
+            [value]="selectedGame"
+            readonly>
+          <div class="select-arrow">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+              <path d="M7 10l5 5 5-5H7z"/>
+            </svg>
+          </div>
+        </div>
+
+        <ul class="dropdown-list" [ngClass]="{'show': showDropdown}">
+          <li *ngFor="let game of gameList" (click)="selectGame(game)">{{ game }}</li>
+        </ul>
       </div>
-      <button type="submit" class="submit-button">Create game</button>
+    </div>
+
+    <button type="submit" class="create-button">Create Game</button>
   </form>
-<!--</div>-->
+</div>

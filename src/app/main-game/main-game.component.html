@@ -1,3 +1,4 @@
+<!-- Login Modal -->
 <div *ngIf="overlay" class="overlay" id="overlay">
   <div id="popup" class="pop_up">
     <div *ngIf="!displayNameEntered" class="login-container">
@@ -11,177 +12,219 @@
           [(ngModel)]="displayName"
           required
         />
-        <button type="submit" class="login-button" id="login_btn">
+        <button type="submit" class="login-button" id="login_btn" [disabled]="!displayName.trim()">
           Continue to game
         </button>
       </form>
     </div>
   </div>
 </div>
-<header class="game-name">
-  <img class="poker-logo" src="/assets/blulogix.logo.png" alt="logo" />
-  <div class="game-entered">
-    <p>{{ gameName }}</p>
-  </div>
-  <div class="right_section">
-    <div *ngIf="register" class="register">
-      <div class="text_user">
-        <p>Sign up</p>
+
+<!-- Main layout with sidebar and content -->
+<div class="app-container">
+  <!-- Left Sidebar for issue management -->
+  <aside class="issues-sidebar" [ngClass]="{ open: isSidebarOpen }">
+    <div class="sidebar-header">
+      <h2>Issue Management</h2>
+      <button class="sidebar-close-btn" (click)="toggleSidebar()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+          <path d="M18.3 5.71a.996.996 0 00-1.41 0L12 10.59 7.11 5.7A.996.996 0 105.7 7.11L10.59 12 5.7 16.89a.996.996 0 101.41 1.41L12 13.41l4.89 4.89a.996.996 0 101.41-1.41L13.41 12l4.89-4.89c.38-.38.38-1.02 0-1.4z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="sidebar-content">
+      <div class="file-upload-section">
+        <h3>Import Issues</h3>
+        <p class="upload-instructions">Upload an Excel file with your issues to estimate story points</p>
+
+        <div class="file-input-container">
+          <label for="fileUpload" class="file-upload-btn">Import from Excel</label>
+          <input
+            type="file"
+            id="fileUpload"
+            (change)="onFileChange($event)"
+            accept=".xlsx, .xls"/>
+        </div>
+
+        <div *ngIf="fileUploadError" class="error-message">
+          {{ fileUploadError }}
+        </div>
+
+        <div *ngIf="specificData.length > 0" class="file-stats">
+          <button class="export-btn" (click)="exportEstimates()">
+            Export Estimates
+          </button>
+          <span>{{ specificData.length }} issues loaded</span>
+        </div>
       </div>
-      <div class="text_user">
-        <p>Log in</p>
+
+      <!-- Issues list -->
+      <div *ngIf="specificData.length > 0" class="issues-list">
+        <div class="issues-header">
+          <h3>Issues to Estimate</h3>
+          <span class="issues-count">{{ specificData.length }} items</span>
+        </div>
+
+        <div class="issues-container">
+          <div *ngFor="let issue of specificData"
+               class="issue-card"
+               [class.selected]="selectedTicket && selectedTicket.Key === issue.Key"
+               (click)="setSelectVotingTicket(issue)">
+            <div class="issue-key">{{ issue.Key }}</div>
+            <div class="issue-summary">{{ issue.Summary }}</div>
+            <div class="issue-footer">
+              <span class="issue-status" [class]="getTicketStatusClass(issue.Status)">{{ issue.Status }}</span>
+              <span class="issue-estimate" *ngIf="issue['Story point']">
+                {{ issue['Story point'] }} points
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <div *ngIf="displayNameEntered" class="user-card" id="userNameDisplay" (click)="toggleDropdown($event)">
-      <div class="user-circle">
-        <p id="userInitial">{{ displayName.charAt(0).toUpperCase() }}</p>
+  </aside>
+
+  <!-- Main content area -->
+  <main class="main-content">
+    <!-- Header with navigation and user info -->
+    <header class="app-header">
+      <div class="header-left">
+        <img class="app-logo" src="/assets/blulogix.logo.png" alt="Planning Poker Logo" />
+        <h1 class="game-title">{{ gameName }}</h1>
       </div>
-      <div class="user-header">
-        <h2 id="userName">{{ displayName }}</h2>
-      </div>
-      <div class="dropdown-container">
-        <div class="image-icon">
-          <img src="/assets/arrow_drop.jpg" alt="arrow list" />
+
+      <div class="header-right">
+        <!-- User profile dropdown -->
+        <div *ngIf="displayNameEntered" class="user-profile" (click)="toggleDropdown($event)">
+          <div class="user-avatar">
+            {{ displayName.charAt(0).toUpperCase() }}
+          </div>
+          <span class="user-name">{{ displayName }}</span>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18">
+            <path d="M7 10l5 5 5-5H7z"/>
+          </svg>
+
+          <div class="dropdown-menu" *ngIf="isDropdownOpen">
+            <ul>
+              <li><a href="#" (click)="logout()">Sign out</a></li>
+            </ul>
+          </div>
         </div>
-        <div class="dropdown-menu" *ngIf="isDropdownOpen">
-          <ul>
-<!--            <li><a href="#">Login</a></li>-->
-<!--            <li><a href="#">Sign up</a></li>-->
-            <li><a href="#" (click)="logout()">Sign out</a></li>
-          </ul>
+
+        <!-- Invitation button -->
+        <button class="invite-btn" (click)="invitePlayer()">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+            <path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm-8 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm0-8c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm8 8c-1.1 0-2.08.42-2.84 1.1-.33.34-.17.89.33 1.02.37.09.77.18 1.25.26a13.17 13.17 0 014.43 1.55c.37.22.82-.03.84-.45.01-.31-.26-.59-.57-.67a9.48 9.48 0 00-1.78-.4c1.12-.59 1.88-1.75 1.88-3.1 0-1.93-1.57-3.5-3.5-3.5z"/>
+          </svg>
+          Invite players
+        </button>
+
+        <!-- Issues button -->
+        <button class="issues-btn" (click)="toggleSidebar()">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+            <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zM7 10h2v2H7v-2zm0 4h2v2H7v-2zm4-4h6v2h-6v-2zm0 4h6v2h-6v-2z"/>
+          </svg>
+          Issues
+        </button>
+      </div>
+    </header>
+
+    <!-- Invitation modal -->
+    @if (isOpenInvitationModal) {
+      <app-invitation-modal [isVisible]="showModal" (closeModal)="closeModel()"></app-invitation-modal>
+    }
+
+    <!-- Game content -->
+    <div class="game-content">
+      <!-- Issue being voted on -->
+      <div class="current-issue" *ngIf="selectedTicket">
+        <div class="issue-header">
+          <span class="issue-key">{{ selectedTicket.Key }}</span>
+          <span class="issue-status" [class]="getTicketStatusClass(selectedTicket.Status)">
+            {{ selectedTicket.Status }}
+          </span>
+        </div>
+        <h2 class="issue-title">{{ selectedTicket.Summary }}</h2>
+        <div class="issue-assignee" *ngIf="selectedTicket.Assignee">
+          Assigned to: {{ selectedTicket.Assignee }}
         </div>
       </div>
-    </div>
-    <div class="invitation-box">
-      @if (isOpenInvitationModal) {
-        <app-invitation-modal [isVisible]="showModal" (closeModal)="closeModel()" ></app-invitation-modal>
-      }
-      <img src="/assets/invitation.jpg" alt="invitation" />
-      <div class="text">
-        <p (click)="invitePlayer()">Invite players</p>
+
+      <div class="no-issue-selected" *ngIf="!selectedTicket">
+        <div class="empty-state">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48">
+            <path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zM7 10h2v2H7v-2zm0 4h2v2H7v-2zm4-4h6v2h-6v-2zm0 4h6v2h-6v-2z"/>
+          </svg>
+          <h3>No issue selected</h3>
+          <p>Select an issue from the sidebar to start voting</p>
+          <button class="open-sidebar-btn" (click)="toggleSidebar()">Open Issues</button>
+        </div>
+      </div>
+
+      <!-- Voting area -->
+      <div class="voting-area" *ngIf="selectedTicket && !countdownFinished">
+        <div class="voting-status">
+          <h3 *ngIf="!cardsPicked">Choose your card</h3>
+          <h3 *ngIf="cardsPicked && !countdownStarted">Ready to reveal?</h3>
+          <h3 *ngIf="countdownStarted">Revealing in {{ countdownValue }}</h3>
+        </div>
+
+        <div class="card-picked-display" *ngIf="cardsPicked">
+          <div class="card" [class.selected]="true">
+            {{ selectedCard }}
+          </div>
+          <span class="card-selected-text">Your vote</span>
+        </div>
+
+        <div class="reveal-action" *ngIf="cardsPicked && !countdownStarted">
+          <button class="reveal-btn" (click)="startCountdown()">Reveal Cards</button>
+        </div>
+      </div>
+
+      <!-- Results area -->
+      <div class="results-area" *ngIf="countdownFinished && selectedTicket">
+        <div class="results-header">
+          <h3>Voting Results</h3>
+        </div>
+
+        <div class="results-summary">
+          <div class="result-card">
+            <span class="result-label">Your vote</span>
+            <div class="card result-vote">{{ selectedCard }}</div>
+          </div>
+
+          <div class="result-average">
+            <span class="result-label">Final estimate</span>
+            <div class="average-value">{{ average }}</div>
+          </div>
+
+          <div class="result-agreement">
+            <span class="result-label">Agreement</span>
+            <div class="agreement-indicator">
+              <img src="/assets/agreement.png" alt="Agreement level" />
+            </div>
+          </div>
+        </div>
+
+        <div class="new-vote-action">
+          <button class="new-vote-btn" (click)="finishCountdown()">Start New Vote</button>
+        </div>
       </div>
     </div>
 
-    <div class="issues" (click)="toggleSidebar()">
-      <img src="/assets/issues.jpg" alt="issues" />
-    </div>
-  </div>
-</header>
-<aside class="sidebar" [ngClass]="{ open: isSidebarOpen }">
-  <header class="sidebar-header">
-    <h2>Issues</h2>
-    <button class="close-btn" (click)="toggleSidebar()">
-        <svg class="cancel-button"
-             xmlns="http://www.w3.org/2000/svg"
-             x="0px"
-             y="0px"
-             width="100"
-             height="100"
-             viewBox="0 0 16 16">
-          <path
-            d="M 2.75 2.042969 L 2.042969 2.75 L 2.398438 3.101563 L 7.292969 8 L 2.042969 13.25 L 2.75 13.957031 L 8 8.707031 L 12.894531 13.605469 L 13.25 13.957031 L 13.957031 13.25 L 13.605469 12.894531 L 8.707031 8 L 13.957031 2.75 L 13.25 2.042969 L 8 7.292969 L 3.101563 2.398438 Z">
-          </path>
-      </svg>
-    </button>
-  </header>
-  <div class="sidebar-content">
-    <input
-      type="file"
-      id="fileUpload"
-      (change)="onFileChange($event)"
-      accept=".xlsx, .xls"/>
-  </div>
-  <body *ngIf="specificData.length > 0" class="data-table">
-    <table>
-      <thead>
-        <tr>
-          <th *ngFor="let header of expectedColumns">{{ header }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr *ngFor="let row of specificData" class="hover-row">
-          <td *ngFor="let header of expectedColumns">
-            {{  row[header]  }}
-          </td>
-          <td class="action-buttons">
-            <button class="action-btn edit" (click)="setSelectVotingTicket(row)">Vote</button>
-<!--            <button class="action-btn delete" (click)="selectEstimated(row)">Select Estimate</button>-->
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </body>
-</aside>
-<div class="middle_container">
-  <div id="blue_deck" class="deck">
-    <div class="text_card">
-      <p *ngIf="!cardsPicked">Pick your cards!</p>
-      <button
-        *ngIf="cardsPicked && !countdownStarted && !countdownFinished"
-        (click)="startCountdown()"
-        class="reveal-button"> Reveal cards
-      </button>
-      <span *ngIf="countdownStarted" class="countdown">{{ countdownValue }}</span>
-      <button
-        *ngIf="countdownFinished"
-        (click)="finishCountdown()"
-        class="newVotingbtn"
-      >
-        Start new voting
-      </button>
-    </div>
-  </div>
-  <div
-    class="picked_card"
-    id="cardPicked"
-    [ngClass]="{ selected: cardsPicked, revealed: countdownFinished }"
-  >
-    <span *ngIf="countdownFinished">{{ selectedCard }}</span>
-  </div>
-  <div *ngIf="displayNameEntered" class="user" id="user">
-    <p id="user_name">{{ displayName }}</p>
-  </div>
-</div>
-<footer>
-  <div class="beforeReveal" *ngIf="!countdownFinished">
-    <div id="footerContent">
-      <div class="bottom_section" id="bottom_sec">
-        <div class="bottom_title">
-          <p  *ngIf="selectedTicket">Voting {{selectedTicket.Key}} Ticket</p>
-          <p *ngIf="!selectedTicket">
-            {{ countdownInProgress ? 'Counting votes...' : 'Choose your card' }}
-          </p>
+    <!-- Card deck for voting -->
+    <div class="card-deck" *ngIf="selectedTicket && !countdownFinished">
+      <div class="card-deck-container">
+        <div
+          *ngFor="let card of cardList"
+          class="card"
+          [class.selected]="selectedCard === card"
+          [class.disabled]="countdownInProgress"
+          (click)="!countdownInProgress && onCardClick(card)">
+          {{ card }}
         </div>
       </div>
     </div>
-    <div id="cardContainer">
-      <div
-        *ngFor="let card of cardList"
-        class="card"
-        [class.selected]="selectedCard === card"
-        [class.countdown-active]="countdownInProgress"
-        (click)="selectedTicket ? onCardClick(card): null"
-      >
-        {{ card }}
-      </div>
-    </div>
-  </div>
-  <div *ngIf="countdownFinished" class="voting_Results" id="votingResults">
-    <div class="votingleft">
-      <div class="line" id="line"></div>
-      <div class="voted_card" id="voted_card">
-        <p>{{ selectedCard }}</p>
-      </div>
-    </div>
-    <div class="votingRight">
-      <div class="average">
-        <p>Average:</p>
-        <h1>{{ average }}</h1>
-      </div>
-      <div class="Agreement">
-        <p>Agreement:</p>
-        <img src="/assets/agreement.png" />
-      </div>
-    </div>
-  </div>
-</footer>
+  </main>
+</div>

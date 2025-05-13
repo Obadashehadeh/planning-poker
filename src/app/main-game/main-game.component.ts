@@ -9,6 +9,14 @@ import { StorageService } from '../services/storage.service/storage.service';
 import { InvitationService } from '../services/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
 
+interface JiraTicket {
+  Key: string;
+  Summary: string;
+  Status: string;
+  Assignee: string;
+  'Story point': number | string;
+}
+
 @Component({
   selector: 'app-main-game',
   templateUrl: './main-game.component.html',
@@ -24,16 +32,16 @@ export class MainGameComponent implements OnInit, OnChanges {
   lastClickedCard: number | null = null;
   cardsPicked: boolean = false;
   countdownStarted: boolean = false;
-  countdownValue: number = 2;
+  countdownValue: number = 3;
   countdownInProgress: boolean = false;
   countdownFinished: boolean = false;
   average: number = 0;
   selectedCards: number[] = [];
   showModal: boolean = false;
   isSidebarOpen: boolean = false;
-  specificData: any[] = [];
+  specificData: JiraTicket[] = [];
   uploadedData: any[] = [];
-  expectedColumns: string[] = ["Key","Summary","Status","Assignee","Story point estimate"];
+  expectedColumns: string[] = ["Key", "Summary", "Status", "Assignee", "Story point"];
   displayNameEntered: boolean = false;
   displayName: string = '';
   register: boolean = true;
@@ -41,7 +49,9 @@ export class MainGameComponent implements OnInit, OnChanges {
   isDropdownOpen: boolean = false;
   isModalVisible: boolean = false;
   isOpenInvitationModal = false;
-  selectedTicket: any = null;
+  selectedTicket: JiraTicket | null = null;
+  fileUploadError: string = '';
+
   constructor(
     private gameService: GameService,
     private storageService: StorageService,
@@ -54,23 +64,33 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   ngOnInit(): void {
-    this.gameType = this.gameService.getGameType();
+    this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
     const storedDisplayName = this.storageService.getDisplayName();
+
     if (storedDisplayName) {
       this.displayNameEntered = true;
       this.register = false;
       this.overlay = false;
       this.displayName = storedDisplayName;
     }
+
+    this.gameName = this.gameService.getGameName() || 'Planning Poker Game';
+
     this.gameService.gameName$.subscribe((gameName) => {
-      this.gameName = gameName;
+      this.gameName = gameName || 'Planning Poker Game';
     });
-    this.submitDisplayName();
+
+    if (this.displayName) {
+      this.submitDisplayName();
+    }
+
     this.initializeCardList();
+
+    this.loadSavedTickets();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['selectedCard']) {
+    if (changes['selectedCard'] && !changes['selectedCard'].firstChange) {
       this.storageService.storeLastClickedCard(this.selectedCard);
     }
   }
@@ -95,16 +115,24 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   onCardClick(card: number): void {
+    if (this.countdownInProgress) return;
+
     this.selectedCard = card;
     this.cardsPicked = true;
+
+    this.storageService.storeLastClickedCard(card);
   }
 
   startCountdown(): void {
+    if (!this.selectedTicket) {
+      alert('Please select a ticket to vote on first');
+      return;
+    }
+
     this.countdownStarted = true;
     this.countdownInProgress = true;
+    this.countdownValue = 3;
     this.updateCountdown();
-    this.storageService.storeLastClickedCard(this.selectedCard);
-    this.calculateAverage();
   }
 
   updateCountdown(): void {
@@ -117,23 +145,42 @@ export class MainGameComponent implements OnInit, OnChanges {
         this.countdownInProgress = false;
         this.countdownFinished = true;
         this.countdownValue = 0;
+        this.calculateAverage();
       }
-    }, 800);
+    }, 1000);
   }
 
   finishCountdown(): void {
     this.countdownStarted = false;
     this.countdownInProgress = false;
-    this.countdownFinished = true;
-    location.reload();
+    this.countdownFinished = false;
+    this.cardsPicked = false;
+    this.selectedCard = 0;
+
+    if (this.selectedTicket) {
+      this.updateTicketEstimate(this.selectedTicket, this.average);
+      this.saveTickets();
+    }
   }
 
   calculateAverage(): void {
-    const selectedCards: number[] = this.storageService.getStoredCards();
+    const selectedCards: number[] = [this.selectedCard];
     const sum = selectedCards.reduce((acc, card) => acc + card, 0);
     const average = selectedCards.length > 0 ? sum / selectedCards.length : 0;
-    this.average = parseFloat(average.toFixed(2));
-    this.setStoryPoint(this.average);
+    this.average = parseFloat(average.toFixed(1));
+
+    if (this.selectedTicket) {
+      this.updateTicketEstimate(this.selectedTicket, this.average);
+    }
+  }
+
+  updateTicketEstimate(ticket: JiraTicket, estimate: number): void {
+    ticket['Story point'] = estimate;
+
+    const ticketIndex = this.specificData.findIndex(t => t.Key === ticket.Key);
+    if (ticketIndex !== -1) {
+      this.specificData[ticketIndex]['Story point'] = estimate;
+    }
   }
 
   invitePlayer(): void {
@@ -146,31 +193,175 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   onFileChange(event: any): void {
+    this.fileUploadError = '';
     const target: DataTransfer = <DataTransfer>event.target;
+
     if (target.files.length !== 1) {
-      console.error('Cannot upload multiple files at once.');
+      this.fileUploadError = 'Please select a single file';
       return;
     }
 
     const file: File = target.files[0];
+
+    if (!this.isValidExcelFile(file)) {
+      this.fileUploadError = 'Invalid file type. Please upload an Excel file (.xlsx, .xls)';
+      return;
+    }
+
     const reader: FileReader = new FileReader();
 
     reader.onload = (e: any) => {
-      const binaryData: string = e.target.result;
-      const workbook: XLSX.WorkBook = XLSX.read(binaryData, { type: 'binary' });
-      const sheetName: string = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      this.uploadedData = XLSX.utils.sheet_to_json(sheet);
-      this.specificData = this.uploadedData.map((row: any) => {
-        const filteredRow: any = {};
-        this.expectedColumns.forEach(col => {
-          filteredRow[col] = row[col] ?? '';
+      try {
+        const binaryData: string = e.target.result;
+        const workbook: XLSX.WorkBook = XLSX.read(binaryData, {
+          type: 'binary',
+          cellDates: true,
+          cellStyles: true
         });
-        return filteredRow;
-      });
+
+        if (workbook.SheetNames.length === 0) {
+          this.fileUploadError = 'The Excel file contains no sheets';
+          return;
+        }
+
+        const sheetName: string = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        this.uploadedData = XLSX.utils.sheet_to_json(sheet);
+
+        if (this.uploadedData.length === 0) {
+          this.fileUploadError = 'No data found in the Excel file';
+          return;
+        }
+
+        this.processUploadedData();
+      } catch (error) {
+        console.error('Error processing Excel file:', error);
+        this.fileUploadError = 'Error processing Excel file. Please check the file format.';
+      }
     };
+
+    reader.onerror = () => {
+      this.fileUploadError = 'Error reading file';
+    };
+
     reader.readAsBinaryString(file);
   }
+
+  private isValidExcelFile(file: File): boolean {
+    const validTypes = [
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/octet-stream'
+    ];
+
+    return validTypes.includes(file.type) ||
+      file.name.endsWith('.xlsx') ||
+      file.name.endsWith('.xls');
+  }
+
+  private processUploadedData(): void {
+    const missingColumns = this.validateRequiredColumns(this.uploadedData);
+
+    if (missingColumns.length > 0) {
+      this.fileUploadError = `Missing required columns: ${missingColumns.join(', ')}`;
+      return;
+    }
+
+    this.specificData = this.uploadedData.map((row: any) => {
+      const ticket: JiraTicket = {
+        Key: row.Key || '',
+        Summary: row.Summary || '',
+        Status: row.Status || 'To Do',
+        Assignee: row.Assignee || '',
+        'Story point': row['Story point'] || ''
+      };
+      return ticket;
+    });
+
+    this.specificData.sort((a, b) => a.Key.localeCompare(b.Key));
+
+    this.saveTickets();
+
+    if (window.innerWidth < 768) {
+      setTimeout(() => this.isSidebarOpen = false, 1000);
+    }
+  }
+
+  private validateRequiredColumns(data: any[]): string[] {
+    if (data.length === 0) return [];
+
+    const firstRow = data[0];
+    const requiredColumns = ['Key', 'Summary']; // Only these two are truly required
+
+    return requiredColumns.filter(col => !(col in firstRow));
+  }
+
+  private saveTickets(): void {
+    this.storageService.storeTickets(this.specificData);
+  }
+
+  private loadSavedTickets(): void {
+    const savedTickets = this.storageService.getStoredTickets();
+    if (savedTickets && savedTickets.length > 0) {
+      this.specificData = savedTickets;
+    }
+  }
+
+  setSelectVotingTicket(ticket: JiraTicket): void {
+    this.selectedTicket = ticket;
+
+    this.cardsPicked = false;
+    this.countdownFinished = false;
+    this.selectedCard = 0;
+
+    if (window.innerWidth < 768) {
+      this.isSidebarOpen = false;
+    }
+  }
+
+  getTicketStatusClass(status: string): string {
+    if (!status) return 'status-todo';
+
+    status = status.toLowerCase();
+    if (status.includes('open') || status.includes('to do') || status.includes('todo')) {
+      return 'status-todo';
+    } else if (status.includes('progress') || status.includes('doing') || status.includes('in dev')) {
+      return 'status-progress';
+    } else if (status.includes('done') || status.includes('completed') || status.includes('closed')) {
+      return 'status-done';
+    }
+    return 'status-todo';
+  }
+
+  exportEstimates(): void {
+    if (this.specificData.length === 0) {
+      alert('No data to export');
+      return;
+    }
+
+    const worksheet = XLSX.utils.json_to_sheet(this.specificData);
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Estimates');
+
+    const filename = 'planning_poker_estimates_' + new Date().toISOString().slice(0, 10) + '.csv';
+    XLSX.writeFile(workbook, filename);
+  }
+
+  closeModel(): void {
+    this.isOpenInvitationModal = false;
+  }
+
+  logout(): void {
+    this.storageService.clearDisplayName();
+    this.router.navigate(['/create-game']);
+  }
+
+  private getDefaultGameType(): string {
+    return 'Fibonacci (0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89)';
+  }
+
   private initializeCardList(): void {
     if (this.gameType.includes('Fibonacci')) {
       this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
@@ -178,22 +369,8 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.cardList = Array.from({ length: 15 }, (_, i) => i + 1);
     } else if (this.gameType.includes('Powers of 2')) {
       this.cardList = [0, 1, 2, 4, 8, 16, 32, 64];
+    } else {
+      this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
     }
-  }
-
-  protected readonly Object = Object;
-  closeModel() {
-    this.isOpenInvitationModal = false;
-  }
-  logout(): void {
-    this.storageService.clearStoredData();
-    sessionStorage.clear();
-    this.router.navigate(['/create-game']);
-  }
-  setSelectVotingTicket(row: any) {
-    this.selectedTicket = row;
-  }
-  setStoryPoint(average:number) {
-    this.selectedTicket['Story point estimate'] = average;
   }
 }
