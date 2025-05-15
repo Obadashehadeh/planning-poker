@@ -15,7 +15,7 @@ export class StorageService {
   private displayNameKey = 'displayName';
   private selectedCardsKey = 'selectedCards';
   private ticketsKey = 'jiraTickets';
-
+  private selectedTicketKey = 'selectedTicket';
   constructor() { }
 
   setDisplayName(displayName: string): void {
@@ -60,7 +60,17 @@ export class StorageService {
       this.storeTickets(tickets);
     }
   }
+  setSelectedTicket(ticket: JiraTicket): void {
+    localStorage.setItem(this.selectedTicketKey, JSON.stringify(ticket));
+  }
+  getSelectedTicket(): JiraTicket | null {
+    const ticket = localStorage.getItem(this.selectedTicketKey);
+    return ticket ? JSON.parse(ticket) : null;
+  }
 
+  clearSelectedTicket(): void {
+    localStorage.removeItem(this.selectedTicketKey);
+  }
   clearStoredData(): void {
     localStorage.clear();
   }

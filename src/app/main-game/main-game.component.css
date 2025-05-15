@@ -776,3 +776,48 @@ app-invitation-modal {
 .login-title {
   font-size: 20px;
 }
+
+.participant-votes {
+  margin-top: 24px;
+  border-top: 1px solid #eaeaea;
+  padding-top: 24px;
+}
+
+.participant-votes-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.participant-votes-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+.participant-vote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.participant-name {
+  font-size: 14px;
+  margin-bottom: 8px;
+}
+
+.vote-card {
+  width: 48px;
+  height: 68px;
+  border: 2px solid #45b1c1;
+  background-color: white;
+  color: #45b1c1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 18px;
+}

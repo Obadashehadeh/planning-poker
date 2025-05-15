@@ -4,10 +4,13 @@ import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import * as XLSX from 'xlsx';
 
-import { GameService } from '../services/game.service/game.service';
+import { GameService } from '../../../../../../UI-Blu7-SDK/apps/administration/src/app/services/game.service';
 import { StorageService } from '../services/storage.service/storage.service';
 import { InvitationService } from '../services/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
+import { SessionService } from '../services/session.service';
+import { ActivatedRoute } from '@angular/router';
+import { Subscription } from 'rxjs';
 
 interface JiraTicket {
   Key: string;
@@ -51,11 +54,15 @@ export class MainGameComponent implements OnInit, OnChanges {
   isOpenInvitationModal = false;
   selectedTicket: JiraTicket | null = null;
   fileUploadError: string = '';
-
+  private subscriptions: Subscription[] = [];
+  public  participantVotes: {[key: string]: number} = {};
+  public Object = Object;
   constructor(
     private gameService: GameService,
     private storageService: StorageService,
     private invitationService: InvitationService,
+    private sessionService: SessionService,
+    private route: ActivatedRoute,
     private router: Router
   ) {
     this.invitationService.getInvitationStatus().subscribe((status) => {
@@ -64,6 +71,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   ngOnInit(): void {
+    this.sessionService.checkUrlForSession();
     this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
     const storedDisplayName = this.storageService.getDisplayName();
 
@@ -87,6 +95,11 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.initializeCardList();
 
     this.loadSavedTickets();
+    const savedTicket = this.storageService.getSelectedTicket();
+    if (savedTicket) {
+      this.selectedTicket = savedTicket;
+    }
+    this.subscribeToSessionEvents();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -121,6 +134,10 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.cardsPicked = true;
 
     this.storageService.storeLastClickedCard(card);
+    this.sessionService.broadcastEvent('vote', {
+      card: card,
+      user: this.displayName
+    });
   }
 
   startCountdown(): void {
@@ -132,6 +149,9 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.countdownStarted = true;
     this.countdownInProgress = true;
     this.countdownValue = 3;
+    this.sessionService.broadcastEvent('reveal', {
+      ticketKey: this.selectedTicket.Key
+    });
     this.updateCountdown();
   }
 
@@ -156,17 +176,26 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.countdownFinished = false;
     this.cardsPicked = false;
     this.selectedCard = 0;
+    this.participantVotes = {};
 
     if (this.selectedTicket) {
+      this.sessionService.broadcastEvent('reset_voting', {
+        ticketKey: this.selectedTicket.Key
+      });
+
       this.updateTicketEstimate(this.selectedTicket, this.average);
       this.saveTickets();
+    } else {
+      this.sessionService.broadcastEvent('reset_voting', {});
     }
   }
 
   calculateAverage(): void {
-    const selectedCards: number[] = [this.selectedCard];
-    const sum = selectedCards.reduce((acc, card) => acc + card, 0);
-    const average = selectedCards.length > 0 ? sum / selectedCards.length : 0;
+    const allVotes = [this.selectedCard, ...Object.values(this.participantVotes)];
+    const filteredVotes = allVotes.filter(vote => vote > 0);
+
+    const sum = filteredVotes.reduce((acc, card) => acc + card, 0);
+    const average = filteredVotes.length > 0 ? sum / filteredVotes.length : 0;
     this.average = parseFloat(average.toFixed(1));
 
     if (this.selectedTicket) {
@@ -235,6 +264,11 @@ export class MainGameComponent implements OnInit, OnChanges {
         }
 
         this.processUploadedData();
+        if (this.specificData.length > 0) {
+          this.sessionService.broadcastEvent('update_issues', {
+            issues: this.specificData
+          });
+        }
       } catch (error) {
         console.error('Error processing Excel file:', error);
         this.fileUploadError = 'Error processing Excel file. Please check the file format.';
@@ -315,6 +349,10 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.countdownFinished = false;
     this.selectedCard = 0;
 
+    this.sessionService.broadcastEvent('select_ticket', {
+      ticketKey: this.selectedTicket?.Key,
+      ticketSummary: this.selectedTicket?.Summary
+    });
     if (window.innerWidth < 768) {
       this.isSidebarOpen = false;
     }
@@ -373,4 +411,52 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
     }
   }
+  private subscribeToSessionEvents(): void {
+    this.subscriptions.push(
+      this.sessionService.ticketSelected$.subscribe(data => {
+        if (data && data.ticket) {
+          this.selectedTicket = data.ticket;
+          this.cardsPicked = false;
+          this.countdownFinished = false;
+          this.selectedCard = 0;
+        }
+      })
+    );
+    this.subscriptions.push(
+      this.sessionService.voteReceived$.subscribe(data => {
+        if (data) {
+          this.participantVotes[data.user] = data.card;
+          console.log(`User ${data.user} voted: ${data.card}`);
+        }
+      })
+    );
+    this.subscriptions.push(
+      this.sessionService.revealTriggered$.subscribe(triggered => {
+        if (triggered && !this.countdownStarted) {
+          this.startCountdown();
+        }
+      })
+    );
+
+    this.subscriptions.push(
+      this.sessionService.issuesUpdated$.subscribe(issues => {
+        if (issues && issues.length > 0) {
+          this.specificData = issues;
+        }
+      })
+    );
+
+    this.subscriptions.push(
+      this.sessionService.resetVoting$.subscribe(reset => {
+        if (reset) {
+          this.finishCountdown();
+        }
+      })
+    );
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+  }
+
 }

@@ -20,9 +20,7 @@
   </div>
 </div>
 
-<!-- Main layout with sidebar and content -->
 <div class="app-container">
-  <!-- Left Sidebar for issue management -->
   <aside class="issues-sidebar" [ngClass]="{ open: isSidebarOpen }">
     <div class="sidebar-header">
       <h2>Issue Management</h2>
@@ -59,7 +57,6 @@
         </div>
       </div>
 
-      <!-- Issues list -->
       <div *ngIf="specificData.length > 0" class="issues-list">
         <div class="issues-header">
           <h3>Issues to Estimate</h3>
@@ -85,12 +82,9 @@
     </div>
   </aside>
 
-  <!-- Main content area -->
   <main class="main-content">
-    <!-- Header with navigation and user info -->
     <header class="app-header">
       <div class="header-left">
-        <img class="app-logo" src="/assets/blulogix.logo.png" alt="Planning Poker Logo" />
         <h1 class="game-title">{{ gameName }}</h1>
       </div>
 
@@ -130,14 +124,15 @@
       </div>
     </header>
 
-    <!-- Invitation modal -->
     @if (isOpenInvitationModal) {
-      <app-invitation-modal [isVisible]="showModal" (closeModal)="closeModel()"></app-invitation-modal>
+      <app-invitation-modal
+        *ngIf="isOpenInvitationModal"
+        [isVisible]="true"
+        (closeModal)="closeModel()">
+      </app-invitation-modal>
     }
 
-    <!-- Game content -->
     <div class="game-content">
-      <!-- Issue being voted on -->
       <div class="current-issue" *ngIf="selectedTicket">
         <div class="issue-header">
           <span class="issue-key">{{ selectedTicket.Key }}</span>
@@ -162,7 +157,6 @@
         </div>
       </div>
 
-      <!-- Voting area -->
       <div class="voting-area" *ngIf="selectedTicket && !countdownFinished">
         <div class="voting-status">
           <h3 *ngIf="!cardsPicked">Choose your card</h3>
@@ -182,7 +176,6 @@
         </div>
       </div>
 
-      <!-- Results area -->
       <div class="results-area" *ngIf="countdownFinished && selectedTicket">
         <div class="results-header">
           <h3>Voting Results</h3>
@@ -194,6 +187,16 @@
             <div class="card result-vote">{{ selectedCard }}</div>
           </div>
 
+          <div class="participant-votes" *ngIf="participantVotes && Object.keys(participantVotes).length > 0">
+            <h4 class="participant-votes-title">Team Votes</h4>
+            <div class="participant-votes-list">
+              <div class="participant-vote" *ngFor="let participant of participantVotes | keyvalue">
+                <div class="participant-name">{{ participant.key }}</div>
+                <div class="card vote-card">{{ participant.value }}</div>
+              </div>
+            </div>
+          </div>
+
           <div class="result-average">
             <span class="result-label">Final estimate</span>
             <div class="average-value">{{ average }}</div>
@@ -201,9 +204,9 @@
 
           <div class="result-agreement">
             <span class="result-label">Agreement</span>
-            <div class="agreement-indicator">
-              <img src="/assets/agreement.png" alt="Agreement level" />
-            </div>
+<!--            <div class="agreement-indicator">-->
+<!--              <img src="/assets/agreement.png" alt="Agreement level" />-->
+<!--            </div>-->
           </div>
         </div>
 
@@ -213,7 +216,6 @@
       </div>
     </div>
 
-    <!-- Card deck for voting -->
     <div class="card-deck" *ngIf="selectedTicket && !countdownFinished">
       <div class="card-deck-container">
         <div
