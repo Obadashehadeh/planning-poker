@@ -4,13 +4,13 @@ import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import * as XLSX from 'xlsx';
 
-import { GameService } from '../../../../../../UI-Blu7-SDK/apps/administration/src/app/services/game.service';
 import { StorageService } from '../services/storage.service/storage.service';
 import { InvitationService } from '../services/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
 import { SessionService } from '../services/session.service';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
+import {GameService} from "../services/game.service/game.service";
 
 interface JiraTicket {
   Key: string;
