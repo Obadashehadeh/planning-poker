@@ -57,6 +57,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   private subscriptions: Subscription[] = [];
   public  participantVotes: {[key: string]: number} = {};
   public Object = Object;
+
   constructor(
     private gameService: GameService,
     private storageService: StorageService,
@@ -237,6 +238,12 @@ export class MainGameComponent implements OnInit, OnChanges {
       return;
     }
 
+    const fileButton = document.querySelector('.file-upload-btn') as HTMLElement;
+    const originalText = fileButton?.textContent || 'Import from Excel';
+    if (fileButton) {
+      fileButton.textContent = 'Processing...';
+    }
+
     const reader: FileReader = new FileReader();
 
     reader.onload = (e: any) => {
@@ -265,24 +272,29 @@ export class MainGameComponent implements OnInit, OnChanges {
 
         this.processUploadedData();
 
-        if (this.specificData.length > 0) {
-          console.log('Broadcasting updated issues to all clients:', this.specificData);
-          this.sessionService.broadcastEvent('update_issues', {
-            issues: this.specificData
-          });
-
+        if (fileButton) {
+          fileButton.textContent = 'File Imported!';
           setTimeout(() => {
-            this.sessionService.forceSyncAllClients();
-          }, 500);
+            fileButton.textContent = originalText;
+          }, 3000);
         }
+
+        event.target.value = '';
+
       } catch (error) {
-        console.error('Error processing Excel file:', error);
         this.fileUploadError = 'Error processing Excel file. Please check the file format.';
+
+        if (fileButton) {
+          fileButton.textContent = originalText;
+        }
       }
     };
 
     reader.onerror = () => {
       this.fileUploadError = 'Error reading file';
+      if (fileButton) {
+        fileButton.textContent = originalText;
+      }
     };
 
     reader.readAsBinaryString(file);
@@ -323,8 +335,33 @@ export class MainGameComponent implements OnInit, OnChanges {
 
     this.saveTickets();
 
+    this.broadcastIssuesWithRetry();
+
     if (window.innerWidth < 768) {
       setTimeout(() => this.isSidebarOpen = false, 1000);
+    }
+  }
+
+  private broadcastIssuesWithRetry(retryCount: number = 0): void {
+    const maxRetries = 3;
+    const retryDelay = 1000;
+
+    if (this.specificData.length > 0) {
+      this.sessionService.broadcastEvent('update_issues', {
+        issues: this.specificData,
+        timestamp: new Date().getTime(),
+        forceUpdate: true
+      });
+
+      setTimeout(() => {
+        this.sessionService.forceSyncAllClients();
+      }, 500);
+
+      if (retryCount < maxRetries) {
+        setTimeout(() => {
+          this.broadcastIssuesWithRetry(retryCount + 1);
+        }, retryDelay * (retryCount + 1));
+      }
     }
   }
 
@@ -332,7 +369,7 @@ export class MainGameComponent implements OnInit, OnChanges {
     if (data.length === 0) return [];
 
     const firstRow = data[0];
-    const requiredColumns = ['Key', 'Summary']; // Only these two are truly required
+    const requiredColumns = ['Key', 'Summary'];
 
     return requiredColumns.filter(col => !(col in firstRow));
   }
@@ -420,6 +457,7 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.cardList = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89];
     }
   }
+
   private subscribeToSessionEvents(): void {
     this.subscriptions.push(
       this.sessionService.ticketSelected$.subscribe(data => {
@@ -435,7 +473,6 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.sessionService.voteReceived$.subscribe(data => {
         if (data) {
           this.participantVotes[data.user] = data.card;
-          console.log(`User ${data.user} voted: ${data.card}`);
         }
       })
     );
@@ -450,10 +487,21 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.subscriptions.push(
       this.sessionService.issuesUpdated$.subscribe(issues => {
         if (issues && issues.length > 0) {
-          this.specificData = issues;
+          this.specificData = [...issues];
+
           setTimeout(() => {
             this.specificData = [...issues];
           }, 100);
+
+          if (!this.selectedTicket && issues.length > 0) {
+            const savedTicket = this.storageService.getSelectedTicket();
+            if (savedTicket) {
+              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
+              if (foundTicket) {
+                this.selectedTicket = foundTicket;
+              }
+            }
+          }
         }
       })
     );
@@ -470,20 +518,41 @@ export class MainGameComponent implements OnInit, OnChanges {
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
   }
+
   syncIssuesManually(): void {
     if (this.specificData.length > 0) {
-      this.sessionService.broadcastEvent('update_issues', {
-        issues: this.specificData
-      });
-      this.sessionService.forceSyncAllClients();
-      const originalText = 'Sync Issues';
       const button = document.querySelector('.sync-btn span') as HTMLElement;
+      const originalText = button ? button.textContent : 'Sync Issues';
+
       if (button) {
-        button.textContent = 'Synced!';
-        setTimeout(() => {
-          button.textContent = originalText;
-        }, 2000);
+        button.textContent = 'Syncing...';
       }
+
+      this.sessionService.broadcastEvent('update_issues', {
+        issues: this.specificData,
+        timestamp: new Date().getTime(),
+        forceUpdate: true,
+        manualSync: true
+      });
+
+      this.sessionService.forceSyncAllClients();
+
+      setTimeout(() => {
+        this.sessionService.forceSyncAllClients();
+      }, 1000);
+
+      setTimeout(() => {
+        this.sessionService.forceSyncAllClients();
+      }, 2000);
+
+      setTimeout(() => {
+        if (button) {
+          button.textContent = 'Synced!';
+          setTimeout(() => {
+            button.textContent = originalText || 'Sync Issues';
+          }, 3000);
+        }
+      }, 1500);
     }
   }
 }

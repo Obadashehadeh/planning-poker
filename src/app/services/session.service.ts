@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
 import { StorageService } from './storage.service/storage.service';
-import {GameService} from "./game.service/game.service";
+import { GameService } from "./game.service/game.service";
 
 @Injectable({
   providedIn: 'root'
@@ -11,6 +11,7 @@ export class SessionService {
   private sessionId: string | null = null;
   private isHost = true;
   private broadcastChannel: BroadcastChannel | null = null;
+  private lastSyncTimestamp = 0;
 
   private ticketSelected = new BehaviorSubject<any>(null);
   private voteReceived = new BehaviorSubject<any>(null);
@@ -69,7 +70,7 @@ export class SessionService {
 
       if (!this.isHost) {
         setTimeout(() => {
-          this.broadcastEvent('request_state', { timestamp: new Date().getTime() });
+          this.requestCurrentState();
         }, 1000);
       }
     } else {
@@ -102,7 +103,6 @@ export class SessionService {
       return;
     }
 
-
     switch(message.type) {
       case 'vote':
         this.voteReceived.next(message.data);
@@ -120,10 +120,7 @@ export class SessionService {
         break;
 
       case 'update_issues':
-        if (message.data.issues && message.data.issues.length > 0) {
-          this.storageService.storeTickets(message.data.issues);
-          this.issuesUpdated.next(message.data.issues);
-        }
+        this.handleIssuesUpdate(message);
         break;
 
       case 'reset_voting':
@@ -141,8 +138,34 @@ export class SessionService {
         break;
 
       case 'force_sync':
-        this.sendCurrentState();
+        if (this.isHost) {
+          this.sendCurrentState();
+        } else {
+          this.requestCurrentState();
+        }
         break;
+    }
+  }
+
+  private handleIssuesUpdate(message: any): void {
+    const { data } = message;
+
+    if (data.issues && data.issues.length > 0) {
+      if (data.timestamp && data.timestamp <= this.lastSyncTimestamp) {
+        return;
+      }
+
+      this.lastSyncTimestamp = data.timestamp || new Date().getTime();
+
+      this.storageService.storeTickets(data.issues);
+
+      this.issuesUpdated.next(data.issues);
+
+      if (data.forceUpdate || data.manualSync) {
+        setTimeout(() => {
+          this.issuesUpdated.next([...data.issues]);
+        }, 100);
+      }
     }
   }
 
@@ -151,13 +174,23 @@ export class SessionService {
       gameName: this.gameService.getGameName(),
       gameType: this.gameService.getGameType(),
       issues: this.storageService.getStoredTickets(),
-      selectedTicket: this.storageService.getSelectedTicket()
+      selectedTicket: this.storageService.getSelectedTicket(),
+      timestamp: new Date().getTime()
     };
 
     this.broadcastEvent('full_state', fullState);
   }
 
   private handleFullState(state: any): void {
+    const currentIssues = this.storageService.getStoredTickets();
+    if (!state.timestamp || state.timestamp <= this.lastSyncTimestamp) {
+      if (currentIssues && currentIssues.length > 0) {
+        return;
+      }
+    }
+
+    this.lastSyncTimestamp = state.timestamp || new Date().getTime();
+
     if (state.gameName) {
       this.gameService.setGameName(state.gameName);
     }
@@ -198,16 +231,31 @@ export class SessionService {
           this.gameService.setGameType(gameTypeParam);
         }
 
-        setTimeout(() => {
-          this.broadcastEvent('request_state', { timestamp: new Date().getTime() });
-        }, 1500);
+        this.requestCurrentState();
+        setTimeout(() => this.requestCurrentState(), 1500);
+        setTimeout(() => this.requestCurrentState(), 3000);
       }
     });
   }
 
+  private requestCurrentState(): void {
+    this.broadcastEvent('request_state', {
+      timestamp: new Date().getTime(),
+      clientId: this.generateClientId()
+    });
+  }
+
   public forceSyncAllClients(): void {
-    this.broadcastEvent('force_sync', { timestamp: new Date().getTime() });
-    this.sendCurrentState();
+    this.broadcastEvent('force_sync', {
+      timestamp: new Date().getTime(),
+      sender: this.generateClientId()
+    });
+
+    if (this.isHost) {
+      setTimeout(() => {
+        this.sendCurrentState();
+      }, 500);
+    }
   }
 
   public getSessionId(): string | null {
