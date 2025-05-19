@@ -23,7 +23,7 @@ interface JiraTicket {
 @Component({
   selector: 'app-main-game',
   templateUrl: './main-game.component.html',
-  styleUrls: ['./main-game.component.css'],
+  styleUrls: ['./main-game.component.scss'],
   standalone: true,
   imports: [FormsModule, CommonModule, ReactiveFormsModule, InvitationModalComponent],
 })
@@ -264,10 +264,16 @@ export class MainGameComponent implements OnInit, OnChanges {
         }
 
         this.processUploadedData();
+
         if (this.specificData.length > 0) {
+          console.log('Broadcasting updated issues to all clients:', this.specificData);
           this.sessionService.broadcastEvent('update_issues', {
             issues: this.specificData
           });
+
+          setTimeout(() => {
+            this.sessionService.forceSyncAllClients();
+          }, 500);
         }
       } catch (error) {
         console.error('Error processing Excel file:', error);
@@ -344,15 +350,18 @@ export class MainGameComponent implements OnInit, OnChanges {
 
   setSelectVotingTicket(ticket: JiraTicket): void {
     this.selectedTicket = ticket;
+    this.storageService.setSelectedTicket(ticket);
 
     this.cardsPicked = false;
     this.countdownFinished = false;
     this.selectedCard = 0;
 
     this.sessionService.broadcastEvent('select_ticket', {
+      ticket: this.selectedTicket,
       ticketKey: this.selectedTicket?.Key,
       ticketSummary: this.selectedTicket?.Summary
     });
+
     if (window.innerWidth < 768) {
       this.isSidebarOpen = false;
     }
@@ -442,6 +451,9 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.sessionService.issuesUpdated$.subscribe(issues => {
         if (issues && issues.length > 0) {
           this.specificData = issues;
+          setTimeout(() => {
+            this.specificData = [...issues];
+          }, 100);
         }
       })
     );
@@ -458,5 +470,20 @@ export class MainGameComponent implements OnInit, OnChanges {
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
   }
-
+  syncIssuesManually(): void {
+    if (this.specificData.length > 0) {
+      this.sessionService.broadcastEvent('update_issues', {
+        issues: this.specificData
+      });
+      this.sessionService.forceSyncAllClients();
+      const originalText = 'Sync Issues';
+      const button = document.querySelector('.sync-btn span') as HTMLElement;
+      if (button) {
+        button.textContent = 'Synced!';
+        setTimeout(() => {
+          button.textContent = originalText;
+        }, 2000);
+      }
+    }
+  }
 }

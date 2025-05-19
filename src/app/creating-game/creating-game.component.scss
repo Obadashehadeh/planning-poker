@@ -1,0 +1,176 @@
+$primary-color: #45b1c1;
+$primary-hover: #45b1b0;
+$primary-active: #45b1b0;
+$text-primary: #333;
+$text-secondary: #555;
+$text-muted: #777;
+$text-placeholder: #aaa;
+$border-color: #ddd;
+$border-focus: #45b1c1;
+$background-white: #fff;
+$background-hover: #f5f8ff;
+$shadow-light: rgba(0, 0, 0, 0.05);
+$shadow-dropdown: rgba(0, 0, 0, 0.1);
+$focus-shadow: rgba(64, 154, 250, 0.2);
+
+@mixin transition($properties: all, $duration: 0.2s, $timing: ease) {
+  transition: $properties $duration $timing;
+}
+
+@mixin box-shadow($shadow) {
+  box-shadow: $shadow;
+}
+
+@mixin button-state($bg-color) {
+  background-color: $bg-color;
+  @include transition(background-color);
+}
+
+.create-game-container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 40px 20px;
+
+  @media (max-width: 768px) {
+    padding: 20px;
+  }
+}
+
+.game-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 40px;
+
+  .poker-logo {
+    height: 40px;
+    margin-right: 16px;
+  }
+
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: $text-primary;
+    margin: 0;
+  }
+}
+
+.create-game-form {
+  background-color: $background-white;
+  border-radius: 12px;
+  padding: 30px;
+  @include box-shadow(0 2px 10px $shadow-light);
+
+  @media (max-width: 768px) {
+    padding: 20px;
+  }
+}
+
+.form-group {
+  margin-bottom: 24px;
+
+  label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: $text-secondary;
+  }
+}
+
+.form-input {
+  width: -webkit-fill-available;
+  padding: 12px 16px;
+  border: 1px solid $border-color;
+  border-radius: 8px;
+  font-size: 16px;
+  @include transition(border-color, box-shadow);
+
+  &:focus {
+    border-color: $border-focus;
+    outline: none;
+    @include box-shadow(0 0 0 2px $focus-shadow);
+  }
+
+  &::placeholder {
+    color: $text-placeholder;
+  }
+}
+
+.dropdown {
+  position: relative;
+}
+
+.select-container {
+  position: relative;
+
+  .select-arrow {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: $text-muted;
+    pointer-events: none;
+  }
+}
+
+.dropdown-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background-color: $background-white;
+  border: 1px solid $border-color;
+  border-radius: 8px;
+  margin-top: 4px;
+  @include box-shadow(0 4px 12px $shadow-dropdown);
+  z-index: 100;
+  max-height: 300px;
+  overflow-y: auto;
+  display: none;
+  padding: 0;
+  list-style: none;
+
+  &.show {
+    display: block;
+    animation: fadeIn 0.2s ease-out;
+  }
+
+  li {
+    padding: 12px 16px;
+    cursor: pointer;
+    @include transition(background-color);
+
+    &:hover {
+      background-color: $background-hover;
+    }
+  }
+}
+
+.create-button {
+  width: 100%;
+  padding: 14px 20px;
+  @include button-state($primary-color);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+
+  &:hover {
+    @include button-state($primary-hover);
+  }
+
+  &:active {
+    @include button-state($primary-active);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

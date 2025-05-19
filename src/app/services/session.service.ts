@@ -12,7 +12,6 @@ export class SessionService {
   private isHost = true;
   private broadcastChannel: BroadcastChannel | null = null;
 
-  // Subjects to emit events to components
   private ticketSelected = new BehaviorSubject<any>(null);
   private voteReceived = new BehaviorSubject<any>(null);
   private revealTriggered = new BehaviorSubject<boolean>(false);
@@ -25,7 +24,6 @@ export class SessionService {
     private gameService: GameService,
     private storageService: StorageService
   ) {
-    // First get the sessionId
     this.sessionId = localStorage.getItem('sessionId');
     if (!this.sessionId) {
       this.sessionId = this.generateUniqueId();
@@ -70,7 +68,9 @@ export class SessionService {
       };
 
       if (!this.isHost) {
-        this.broadcastEvent('request_state', { timestamp: new Date().getTime() });
+        setTimeout(() => {
+          this.broadcastEvent('request_state', { timestamp: new Date().getTime() });
+        }, 1000);
       }
     } else {
       console.error('Cannot initialize broadcast channel: sessionId is null');
@@ -81,16 +81,6 @@ export class SessionService {
     if (!this.broadcastChannel) {
       this.initBroadcastChannel();
     }
-
-    const message = {
-      type: eventType,
-      data: data,
-      timestamp: new Date().getTime(),
-      sender: {
-        id: this.generateClientId(),
-        isHost: this.isHost
-      }
-    };
 
     if (this.broadcastChannel) {
       const message = {
@@ -108,58 +98,55 @@ export class SessionService {
   }
 
   private handleBroadcastMessage(message: any): void {
-    // Ignore messages from self
     if (message.sender && message.sender.id === this.generateClientId()) {
       return;
     }
 
-    console.log('Received broadcast message:', message);
 
     switch(message.type) {
       case 'vote':
-        // Emit the vote to subscribers
         this.voteReceived.next(message.data);
         break;
 
       case 'reveal':
-        // Trigger card reveal
         this.revealTriggered.next(true);
         break;
 
       case 'select_ticket':
-        // Handle ticket selection
         this.ticketSelected.next(message.data);
+        if (message.data.ticket) {
+          this.storageService.setSelectedTicket(message.data.ticket);
+        }
         break;
 
       case 'update_issues':
-        // Update issues list
-        this.storageService.storeTickets(message.data.issues);
-        this.issuesUpdated.next(message.data.issues);
+        if (message.data.issues && message.data.issues.length > 0) {
+          this.storageService.storeTickets(message.data.issues);
+          this.issuesUpdated.next(message.data.issues);
+        }
         break;
 
       case 'reset_voting':
-        // Reset the voting state
         this.resetVoting.next(true);
         break;
 
       case 'request_state':
-        // If we're the host, send the current state to the new client
         if (this.isHost) {
           this.sendCurrentState();
         }
         break;
 
       case 'full_state':
-        // Receive full state from host
         this.handleFullState(message.data);
+        break;
+
+      case 'force_sync':
+        this.sendCurrentState();
         break;
     }
   }
 
   private sendCurrentState(): void {
-    // Only the host should send the state
-    if (!this.isHost) return;
-
     const fullState = {
       gameName: this.gameService.getGameName(),
       gameType: this.gameService.getGameType(),
@@ -201,7 +188,6 @@ export class SessionService {
         localStorage.setItem('sessionId', sessionParam);
         this.isHost = false;
 
-        // Re-initialize the broadcast channel with the new session ID
         this.initBroadcastChannel();
 
         if (gameNameParam) {
@@ -211,8 +197,17 @@ export class SessionService {
         if (gameTypeParam) {
           this.gameService.setGameType(gameTypeParam);
         }
+
+        setTimeout(() => {
+          this.broadcastEvent('request_state', { timestamp: new Date().getTime() });
+        }, 1500);
       }
     });
+  }
+
+  public forceSyncAllClients(): void {
+    this.broadcastEvent('force_sync', { timestamp: new Date().getTime() });
+    this.sendCurrentState();
   }
 
   public getSessionId(): string | null {
@@ -229,7 +224,6 @@ export class SessionService {
   }
 
   private generateClientId(): string {
-    // Create a client ID based on some stable factors
     let clientId = localStorage.getItem('clientId');
     if (!clientId) {
       clientId = this.generateUniqueId();

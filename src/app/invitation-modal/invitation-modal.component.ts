@@ -10,7 +10,7 @@ import {GameService} from "../services/game.service/game.service";
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './invitation-modal.component.html',
-  styleUrls: ['./invitation-modal.component.css']
+  styleUrls: ['./invitation-modal.component.scss']
 })
 export class InvitationModalComponent implements OnInit {
   @Input() isVisible: boolean = false;

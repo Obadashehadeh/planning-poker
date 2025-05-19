@@ -8,7 +8,7 @@ import {StorageService} from "../services/storage.service/storage.service";
 @Component({
   selector: 'app-creating-game',
   templateUrl: './creating-game.component.html',
-  styleUrls: ['./creating-game.component.css'],
+  styleUrls: ['./creating-game.component.scss'],
   standalone: true,
   imports: [
     CommonModule,
