@@ -13,9 +13,12 @@ export class SessionService {
   private broadcastChannel: BroadcastChannel | null = null;
   private lastSyncTimestamp = 0;
   private syncRetryCount = 0;
-  private maxSyncRetries = 5;
-  private syncInterval: any = null;
+  private maxSyncRetries = 10;
   private connectionCheckInterval: any = null;
+  private isInitialized = false;
+  private clientId: string;
+  private syncTimeouts: any[] = [];
+  private maxSyncTimeouts = 15;
 
   private ticketSelected = new BehaviorSubject<any>(null);
   private voteReceived = new BehaviorSubject<any>(null);
@@ -30,6 +33,7 @@ export class SessionService {
     private gameService: GameService,
     private storageService: StorageService
   ) {
+    this.clientId = this.generateClientId();
     this.sessionId = localStorage.getItem('sessionId');
     if (!this.sessionId) {
       this.sessionId = this.generateUniqueId();
@@ -84,20 +88,32 @@ export class SessionService {
         }, 1000);
       };
 
-      if (!this.isHost) {
-        setTimeout(() => {
-          this.requestCurrentState();
-        }, 500);
-
-        setTimeout(() => {
-          this.requestCurrentState();
-        }, 2000);
-
-        setTimeout(() => {
-          this.requestCurrentState();
-        }, 5000);
+      if (!this.isHost && !this.isInitialized) {
+        this.performInitialSync();
+        this.isInitialized = true;
       }
     }
+  }
+
+  private performInitialSync(): void {
+    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.syncTimeouts = [];
+
+    const delays = [100, 500, 1000, 2000, 3000, 5000, 8000, 12000, 15000, 20000, 25000, 30000, 40000, 50000, 60000];
+
+    delays.forEach((delay, index) => {
+      if (index < this.maxSyncTimeouts) {
+        const timeout = setTimeout(() => {
+          this.requestCurrentState();
+          this.broadcastEvent('need_issues_urgent', {
+            clientId: this.clientId,
+            timestamp: new Date().getTime(),
+            attempt: index + 1
+          });
+        }, delay);
+        this.syncTimeouts.push(timeout);
+      }
+    });
   }
 
   private startConnectionCheck(): void {
@@ -107,11 +123,19 @@ export class SessionService {
 
     this.connectionCheckInterval = setInterval(() => {
       if (!this.isHost) {
-        this.requestCurrentState();
+        const currentIssues = this.storageService.getStoredTickets();
+        if (currentIssues.length === 0) {
+          this.requestCurrentState();
+          this.broadcastEvent('need_issues_urgent', {
+            clientId: this.clientId,
+            timestamp: new Date().getTime(),
+            reason: 'no_issues_periodic_check'
+          });
+        }
       } else {
         this.sendCurrentState();
       }
-    }, 10000);
+    }, 5000);
   }
 
   public broadcastEvent(eventType: string, data: any): void {
@@ -125,7 +149,7 @@ export class SessionService {
         data: data,
         timestamp: new Date().getTime(),
         sender: {
-          id: this.generateClientId(),
+          id: this.clientId,
           isHost: this.isHost
         }
       };
@@ -133,21 +157,39 @@ export class SessionService {
       try {
         this.broadcastChannel.postMessage(message);
 
-        if (eventType === 'update_issues' && this.isHost) {
+        if (['update_issues', 'full_state', 'need_issues_urgent'].includes(eventType)) {
           setTimeout(() => {
-            this.broadcastChannel!.postMessage(message);
-          }, 1000);
+            if (this.broadcastChannel) {
+              this.broadcastChannel.postMessage(message);
+            }
+          }, 100);
 
           setTimeout(() => {
-            this.broadcastChannel!.postMessage(message);
-          }, 3000);
+            if (this.broadcastChannel) {
+              this.broadcastChannel.postMessage(message);
+            }
+          }, 500);
+
+          if (eventType === 'update_issues' && this.isHost) {
+            setTimeout(() => {
+              if (this.broadcastChannel) {
+                this.broadcastChannel.postMessage(message);
+              }
+            }, 1000);
+
+            setTimeout(() => {
+              if (this.broadcastChannel) {
+                this.broadcastChannel.postMessage(message);
+              }
+            }, 3000);
+          }
         }
-      } catch (error) {
+      } catch (error: unknown) {
         setTimeout(() => {
           if (this.broadcastChannel) {
             try {
               this.broadcastChannel.postMessage(message);
-            } catch (retryError) {
+            } catch (retryError: unknown) {
               this.initBroadcastChannel();
             }
           }
@@ -157,7 +199,7 @@ export class SessionService {
   }
 
   private handleBroadcastMessage(message: any): void {
-    if (message.sender && message.sender.id === this.generateClientId()) {
+    if (message.sender && message.sender.id === this.clientId) {
       return;
     }
 
@@ -192,10 +234,11 @@ export class SessionService {
         break;
 
       case 'request_state':
+      case 'need_issues_urgent':
         if (this.isHost) {
-          setTimeout(() => {
-            this.sendCurrentState();
-          }, 100);
+          this.sendCurrentState();
+          setTimeout(() => this.sendCurrentState(), 100);
+          setTimeout(() => this.sendCurrentState(), 500);
         }
         break;
 
@@ -205,36 +248,35 @@ export class SessionService {
 
       case 'force_sync':
         if (this.isHost) {
-          setTimeout(() => {
-            this.sendCurrentState();
-          }, 100);
+          setTimeout(() => this.sendCurrentState(), 100);
         } else {
-          setTimeout(() => {
-            this.requestCurrentState();
-          }, 100);
+          setTimeout(() => this.requestCurrentState(), 100);
         }
         break;
 
       case 'user_joined':
         this.userJoined.next(message.data);
         if (this.isHost) {
-          setTimeout(() => {
-            this.sendCurrentState();
-          }, 500);
-
-          setTimeout(() => {
-            this.sendCurrentState();
-          }, 2000);
+          setTimeout(() => this.sendCurrentState(), 100);
+          setTimeout(() => this.sendCurrentState(), 500);
+          setTimeout(() => this.sendCurrentState(), 1500);
+          setTimeout(() => this.sendCurrentState(), 3000);
         }
         break;
 
       case 'ping':
         if (this.isHost) {
-          this.broadcastEvent('pong', { timestamp: new Date().getTime() });
+          this.broadcastEvent('pong', {
+            timestamp: new Date().getTime(),
+            hasIssues: this.storageService.getStoredTickets().length > 0
+          });
         }
         break;
 
       case 'pong':
+        if (message.data.hasIssues && this.storageService.getStoredTickets().length === 0) {
+          this.requestCurrentState();
+        }
         break;
     }
   }
@@ -242,26 +284,24 @@ export class SessionService {
   private handleIssuesUpdate(message: any): void {
     const { data } = message;
 
-    if (data.issues && Array.isArray(data.issues)) {
+    if (data.issues && Array.isArray(data.issues) && data.issues.length > 0) {
       const currentIssues = this.storageService.getStoredTickets();
 
       if (data.forceUpdate ||
-        !data.timestamp ||
-        data.timestamp > this.lastSyncTimestamp ||
         currentIssues.length === 0 ||
-        data.issues.length !== currentIssues.length) {
+        data.issues.length !== currentIssues.length ||
+        !data.timestamp ||
+        data.timestamp > this.lastSyncTimestamp) {
 
         this.lastSyncTimestamp = data.timestamp || new Date().getTime();
         this.storageService.storeTickets(data.issues);
         this.issuesUpdated.next([...data.issues]);
 
-        setTimeout(() => {
-          this.issuesUpdated.next([...data.issues]);
-        }, 100);
+        setTimeout(() => this.issuesUpdated.next([...data.issues]), 100);
+        setTimeout(() => this.issuesUpdated.next([...data.issues]), 500);
 
-        setTimeout(() => {
-          this.issuesUpdated.next([...data.issues]);
-        }, 500);
+        this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.syncTimeouts = [];
       }
     }
   }
@@ -276,7 +316,8 @@ export class SessionService {
       issues: issues || [],
       selectedTicket: selectedTicket,
       timestamp: new Date().getTime(),
-      forceUpdate: true
+      forceUpdate: true,
+      sender: 'host_state_broadcast'
     };
 
     this.broadcastEvent('full_state', fullState);
@@ -285,7 +326,8 @@ export class SessionService {
       this.broadcastEvent('update_issues', {
         issues: issues,
         timestamp: new Date().getTime(),
-        forceUpdate: true
+        forceUpdate: true,
+        sender: 'host_issues_broadcast'
       });
     }
   }
@@ -314,9 +356,11 @@ export class SessionService {
         this.storageService.storeTickets(state.issues);
         this.issuesUpdated.next([...state.issues]);
 
-        setTimeout(() => {
-          this.issuesUpdated.next([...state.issues]);
-        }, 100);
+        setTimeout(() => this.issuesUpdated.next([...state.issues]), 100);
+        setTimeout(() => this.issuesUpdated.next([...state.issues]), 500);
+
+        this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+        this.syncTimeouts = [];
       }
     }
 
@@ -329,43 +373,51 @@ export class SessionService {
     }
   }
 
-  public checkUrlForSession(): void {
-    this.route.queryParams.subscribe(params => {
-      const sessionParam = params['session'];
-      const gameNameParam = params['game'];
-      const gameTypeParam = params['type'];
+  public checkUrlForSession(): Promise<void> {
+    return new Promise((resolve) => {
+      this.route.queryParams.subscribe(params => {
+        const sessionParam = params['session'];
+        const gameNameParam = params['game'];
+        const gameTypeParam = params['type'];
 
-      if (sessionParam && sessionParam !== this.sessionId) {
-        this.sessionId = sessionParam;
-        localStorage.setItem('sessionId', sessionParam);
-        this.isHost = false;
+        if (sessionParam && sessionParam !== this.sessionId) {
+          this.sessionId = sessionParam;
+          localStorage.setItem('sessionId', sessionParam);
+          this.isHost = false;
+          this.isInitialized = false;
 
-        this.initBroadcastChannel();
-        this.startConnectionCheck();
+          this.storageService.storeTickets([]);
+          this.storageService.clearSelectedTicket();
 
-        if (gameNameParam) {
-          this.gameService.setGameName(decodeURIComponent(gameNameParam));
+          this.initBroadcastChannel();
+          this.startConnectionCheck();
+
+          if (gameNameParam) {
+            this.gameService.setGameName(decodeURIComponent(gameNameParam));
+          }
+
+          if (gameTypeParam) {
+            this.gameService.setGameType(decodeURIComponent(gameTypeParam));
+          }
+
+          this.requestCurrentStateWithRetry();
         }
-
-        if (gameTypeParam) {
-          this.gameService.setGameType(decodeURIComponent(gameTypeParam));
-        }
-
-        this.requestCurrentStateWithRetry();
-      }
+        resolve();
+      });
     });
   }
 
   private requestCurrentState(): void {
     this.broadcastEvent('request_state', {
       timestamp: new Date().getTime(),
-      clientId: this.generateClientId(),
-      requestIssues: true
+      clientId: this.clientId,
+      requestIssues: true,
+      reason: 'manual_request'
     });
 
     this.broadcastEvent('ping', {
       timestamp: new Date().getTime(),
-      clientId: this.generateClientId()
+      clientId: this.clientId
     });
   }
 
@@ -376,33 +428,31 @@ export class SessionService {
 
   private requestStateWithBackoff(): void {
     this.requestCurrentState();
+    this.broadcastEvent('need_issues_urgent', {
+      clientId: this.clientId,
+      timestamp: new Date().getTime(),
+      attempt: this.syncRetryCount + 1
+    });
 
     if (this.syncRetryCount < this.maxSyncRetries) {
       setTimeout(() => {
         this.syncRetryCount++;
         this.requestStateWithBackoff();
-      }, Math.min(2000 * Math.pow(1.5, this.syncRetryCount), 15000));
+      }, Math.min(1000 * Math.pow(1.5, this.syncRetryCount), 10000));
     }
   }
 
   public forceSyncAllClients(): void {
     this.broadcastEvent('force_sync', {
       timestamp: new Date().getTime(),
-      sender: this.generateClientId()
+      sender: this.clientId
     });
 
     if (this.isHost) {
-      setTimeout(() => {
-        this.sendCurrentState();
-      }, 200);
-
-      setTimeout(() => {
-        this.sendCurrentState();
-      }, 1000);
-
-      setTimeout(() => {
-        this.sendCurrentState();
-      }, 3000);
+      setTimeout(() => this.sendCurrentState(), 100);
+      setTimeout(() => this.sendCurrentState(), 500);
+      setTimeout(() => this.sendCurrentState(), 1500);
+      setTimeout(() => this.sendCurrentState(), 3000);
     }
   }
 
@@ -430,16 +480,15 @@ export class SessionService {
   }
 
   public resetSession(): void {
+    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.syncTimeouts = [];
+
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
     }
 
     if (this.connectionCheckInterval) {
       clearInterval(this.connectionCheckInterval);
-    }
-
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
     }
 
     localStorage.removeItem('sessionId');
@@ -448,22 +497,23 @@ export class SessionService {
     this.sessionId = this.generateUniqueId();
     localStorage.setItem('sessionId', this.sessionId);
     this.isHost = true;
+    this.isInitialized = false;
+    this.clientId = this.generateClientId();
 
     this.initBroadcastChannel();
     this.startConnectionCheck();
   }
 
   ngOnDestroy(): void {
+    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.syncTimeouts = [];
+
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
     }
 
     if (this.connectionCheckInterval) {
       clearInterval(this.connectionCheckInterval);
-    }
-
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
     }
   }
 }

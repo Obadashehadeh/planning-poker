@@ -9,7 +9,7 @@ import { InvitationService } from '../services/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
 import { SessionService } from '../services/session.service';
 import { ActivatedRoute } from '@angular/router';
-import { Subscription, interval } from 'rxjs';
+import { Subscription } from 'rxjs';
 import { GameService } from "../services/game.service/game.service";
 
 interface JiraTicket {
@@ -32,7 +32,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   gameName: string | null = '';
   gameType: string = '';
   cardList: number[] = [];
-  lastClickedCard: number | null = null;
   cardsPicked: boolean = false;
   countdownStarted: boolean = false;
   countdownValue: number = 3;
@@ -44,7 +43,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   isSidebarOpen: boolean = false;
   specificData: JiraTicket[] = [];
   uploadedData: any[] = [];
-  expectedColumns: string[] = ["Key", "Summary", "Status", "Assignee", "Story point"];
+  expectedColumns: string[] = ["Key", "Summary", "Status", "Assignee", "Story point","Description"];
   displayNameEntered: boolean = false;
   displayName: string = '';
   register: boolean = true;
@@ -93,21 +92,11 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
   private async initializeComponent(): Promise<void> {
     try {
-      // Check URL parameters first for session joining
-      this.route.queryParams.subscribe(params => {
-        if (params['session']) {
-          this.isHost = false;
-          this.connectionStatus = 'syncing';
-        }
-      });
-
       await this.sessionService.checkUrlForSession();
 
-      // Initialize game settings
       this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
       this.initializeCardList();
 
-      // Handle display name
       const storedDisplayName = this.storageService.getDisplayName();
       if (storedDisplayName) {
         this.displayNameEntered = true;
@@ -116,39 +105,50 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         this.displayName = storedDisplayName;
       }
 
-      // Set game name
       this.gameName = this.gameService.getGameName() || 'Planning Poker Game';
 
-      // Subscribe to game name changes
       this.subscriptions.push(
         this.gameService.gameName$.subscribe((gameName) => {
           this.gameName = gameName || 'Planning Poker Game';
         })
       );
 
-      // Load saved data
-      this.loadSavedTickets();
-      this.loadSelectedTicket();
-
-      // Determine host status
       this.isHost = this.sessionService.isSessionHost();
 
-      // Subscribe to session events
+      if (this.isHost) {
+        this.loadSavedTickets();
+        this.loadSelectedTicket();
+      } else {
+        setTimeout(() => {
+          this.loadSavedTickets();
+          this.loadSelectedTicket();
+
+          if (this.specificData.length === 0) {
+            this.sessionService.forceSyncAllClients();
+          }
+        }, 1000);
+
+        setTimeout(() => {
+          const currentIssues = this.storageService.getStoredTickets();
+          if (currentIssues.length === 0) {
+            this.sessionService.forceSyncAllClients();
+          }
+        }, 3000);
+      }
+
       this.subscribeToSessionEvents();
 
-      // Auto-submit display name if available
       if (this.displayName) {
         this.submitDisplayName();
       }
 
-      // Start periodic sync for non-host
       if (!this.isHost) {
         this.startPeriodicSync();
         this.requestInitialSync();
       }
 
       this.connectionStatus = 'connected';
-    } catch (error) {
+    } catch (error: unknown) {
       this.connectionStatus = 'disconnected';
       this.retryInitialization();
     }
@@ -165,25 +165,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       clearInterval(this.syncInterval);
     }
 
-    // Check for data every 3 seconds if we don't have any
     this.syncInterval = setInterval(() => {
-      if (!this.initialSyncCompleted || this.specificData.length === 0) {
+      const currentIssues = this.storageService.getStoredTickets();
+      if (!this.initialSyncCompleted || currentIssues.length === 0) {
         this.sessionService.forceSyncAllClients();
       }
-    }, 3000);
+    }, 2000);
   }
 
   private requestInitialSync(): void {
-    // Multiple attempts to get initial data
-    const attempts = [500, 1500, 3000, 5000, 8000];
+    const attempts = [100, 500, 1000, 2000, 3000, 5000, 8000, 12000, 15000, 20000];
 
-    attempts.forEach(delay => {
+    attempts.forEach((delay, index) => {
       setTimeout(() => {
-        if (!this.initialSyncCompleted) {
-          this.sessionService.broadcastEvent('request_state', {
-            timestamp: new Date().getTime(),
-            needsIssues: true
-          });
+        if (!this.initialSyncCompleted || this.storageService.getStoredTickets().length === 0) {
+          this.sessionService.forceSyncAllClients();
         }
       }, delay);
     });
@@ -213,16 +209,33 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.sessionService.broadcastEvent('user_joined', {
         user: this.displayName,
         timestamp: new Date().getTime(),
-        needsSync: !this.isHost
+        needsSync: !this.isHost,
+        clientId: this.generateClientId()
       });
 
-      // Request data after joining if not host
       if (!this.isHost) {
         setTimeout(() => {
           this.sessionService.forceSyncAllClients();
-        }, 1000);
+        }, 500);
+
+        setTimeout(() => {
+          this.sessionService.forceSyncAllClients();
+        }, 2000);
+
+        setTimeout(() => {
+          this.sessionService.forceSyncAllClients();
+        }, 5000);
       }
     }
+  }
+
+  private generateClientId(): string {
+    let clientId = localStorage.getItem('clientId');
+    if (!clientId) {
+      clientId = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+      localStorage.setItem('clientId', clientId);
+    }
+    return clientId;
   }
 
   toggleDropdown(event: MouseEvent): void {
@@ -309,10 +322,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   private broadcastUpdatedIssues(): void {
     if (this.specificData.length > 0) {
       const timestamp = new Date().getTime();
+      const issuesClone = this.specificData.map(issue => ({ ...issue }));
 
-      // Broadcast multiple times to ensure delivery
       this.sessionService.broadcastEvent('update_issues', {
-        issues: this.specificData.map(issue => ({ ...issue })),
+        issues: issuesClone,
         timestamp: timestamp,
         forceUpdate: true,
         source: 'broadcast_updated'
@@ -320,12 +333,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       setTimeout(() => {
         this.sessionService.broadcastEvent('update_issues', {
-          issues: this.specificData.map(issue => ({ ...issue })),
+          issues: issuesClone,
           timestamp: timestamp,
           forceUpdate: true,
-          source: 'broadcast_updated_retry'
+          source: 'broadcast_updated_retry1'
         });
-      }, 1000);
+      }, 500);
+
+      setTimeout(() => {
+        this.sessionService.broadcastEvent('update_issues', {
+          issues: issuesClone,
+          timestamp: timestamp,
+          forceUpdate: true,
+          source: 'broadcast_updated_retry2'
+        });
+      }, 1500);
 
       this.sessionService.forceSyncAllClients();
     }
@@ -413,7 +435,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }
 
       event.target.value = '';
-    } catch (error) {
+    } catch (error: unknown) {
       this.fileUploadError = 'Error processing Excel file. Please check the file format.';
       if (fileButton) {
         fileButton.textContent = originalText;
@@ -449,7 +471,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           }
 
           resolve(data);
-        } catch (error) {
+        } catch (error: unknown) {
           reject(error);
         }
       };
@@ -507,7 +529,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       const timestamp = new Date().getTime();
       const issuesClone = this.specificData.map(issue => ({ ...issue }));
 
-      // Immediate broadcast
       this.sessionService.broadcastEvent('update_issues', {
         issues: issuesClone,
         timestamp: timestamp,
@@ -516,10 +537,8 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         retryCount: retryCount
       });
 
-      // Force sync
       this.sessionService.forceSyncAllClients();
 
-      // Additional broadcasts with delays
       setTimeout(() => {
         this.sessionService.broadcastEvent('update_issues', {
           issues: issuesClone,
@@ -534,7 +553,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         this.sessionService.forceSyncAllClients();
       }, 2000);
 
-      // Retry mechanism
       if (retryCount < maxRetries) {
         setTimeout(() => {
           this.broadcastIssuesWithRetry(retryCount + 1);
@@ -609,9 +627,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Estimates');
 
-      const filename = `planning_poker_estimates_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = `planning_poker_estimates_${new Date().toISOString().slice(0, 10)}.csv`;
       XLSX.writeFile(workbook, filename);
-    } catch (error) {
+    } catch (error: unknown) {
       alert('Error exporting file. Please try again.');
     }
   }
@@ -644,52 +662,14 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   private subscribeToSessionEvents(): void {
-    // Ticket selection events
-    this.subscriptions.push(
-      this.sessionService.ticketSelected$.subscribe(data => {
-        if (data && data.ticket) {
-          this.selectedTicket = data.ticket;
-          this.cardsPicked = false;
-          this.countdownFinished = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      })
-    );
-
-    // Vote events
-    this.subscriptions.push(
-      this.sessionService.voteReceived$.subscribe(data => {
-        if (data && data.user && data.card !== undefined) {
-          this.participantVotes[data.user] = data.card;
-        }
-      })
-    );
-
-    // Reveal events
-    this.subscriptions.push(
-      this.sessionService.revealTriggered$.subscribe(triggered => {
-        if (triggered && !this.countdownStarted) {
-          this.startCountdown();
-        }
-      })
-    );
-
-    // Issues update events - CRITICAL FOR SYNC
     this.subscriptions.push(
       this.sessionService.issuesUpdated$.subscribe(issues => {
         if (issues && Array.isArray(issues) && issues.length > 0) {
-          // Update local data
-          this.specificData = issues.map(issue => ({ ...issue }));
-
-          // Save to localStorage
+          this.specificData = [...issues];
           this.storageService.storeTickets(this.specificData);
-
-          // Mark initial sync as completed
           this.initialSyncCompleted = true;
           this.connectionStatus = 'connected';
 
-          // Update selected ticket if it exists in the new issues
           if (!this.selectedTicket && issues.length > 0) {
             const savedTicket = this.storageService.getSelectedTicket();
             if (savedTicket) {
@@ -703,7 +683,34 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       })
     );
 
-    // Reset voting events
+    this.subscriptions.push(
+      this.sessionService.ticketSelected$.subscribe(data => {
+        if (data && data.ticket) {
+          this.selectedTicket = data.ticket;
+          this.cardsPicked = false;
+          this.countdownFinished = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      })
+    );
+
+    this.subscriptions.push(
+      this.sessionService.voteReceived$.subscribe(data => {
+        if (data && data.user && data.card !== undefined) {
+          this.participantVotes[data.user] = data.card;
+        }
+      })
+    );
+
+    this.subscriptions.push(
+      this.sessionService.revealTriggered$.subscribe(triggered => {
+        if (triggered && !this.countdownStarted) {
+          this.startCountdown();
+        }
+      })
+    );
+
     this.subscriptions.push(
       this.sessionService.resetVoting$.subscribe(reset => {
         if (reset) {
@@ -717,23 +724,29 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       })
     );
 
-    // User joined events
     this.subscriptions.push(
       this.sessionService.userJoined$.subscribe(user => {
         if (user && this.isHost && this.specificData.length > 0) {
-          // Send current state to new user
+          setTimeout(() => {
+            this.broadcastUpdatedIssues();
+          }, 100);
+
           setTimeout(() => {
             this.broadcastUpdatedIssues();
           }, 1000);
 
-          // Send again after a delay to ensure delivery
+          setTimeout(() => {
+            this.broadcastUpdatedIssues();
+          }, 3000);
+
           setTimeout(() => {
             this.sessionService.broadcastEvent('full_state', {
               gameName: this.gameService.getGameName(),
               gameType: this.gameService.getGameType(),
               issues: this.specificData.map(issue => ({ ...issue })),
               selectedTicket: this.selectedTicket,
-              timestamp: new Date().getTime()
+              timestamp: new Date().getTime(),
+              forceUpdate: true
             });
           }, 2000);
         }
@@ -742,6 +755,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   async syncIssuesManually(): Promise<void> {
+    debugger
     if (this.syncInProgress) return;
 
     this.syncInProgress = true;
@@ -757,21 +771,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.connectionStatus = 'syncing';
 
       if (this.isHost && this.specificData.length > 0) {
-        // Host broadcasts current data
         await this.broadcastIssuesWithRetry();
       } else {
-        // Client requests data from host
         this.sessionService.broadcastEvent('request_state', {
           timestamp: new Date().getTime(),
           needsIssues: true,
           manualSync: true
         });
 
-        // Also force sync
         this.sessionService.forceSyncAllClients();
       }
 
-      // Wait for sync to complete
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       this.connectionStatus = 'connected';
@@ -782,7 +792,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           buttonText.textContent = originalText;
         }, 3000);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       this.connectionStatus = 'disconnected';
       if (buttonText) {
         buttonText.textContent = 'Sync Failed';
