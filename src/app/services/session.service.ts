@@ -13,12 +13,15 @@ export class SessionService {
   private broadcastChannel: BroadcastChannel | null = null;
   private lastSyncTimestamp = 0;
   private syncRetryCount = 0;
-  private maxSyncRetries = 10;
+  private maxSyncRetries = 15;
   private connectionCheckInterval: any = null;
   private isInitialized = false;
   private clientId: string;
   private syncTimeouts: any[] = [];
-  private maxSyncTimeouts = 15;
+  private maxSyncTimeouts = 20;
+  private lastHeartbeat = 0;
+  private heartbeatInterval: any = null;
+  private hostDetectionTimeout: any = null;
 
   private ticketSelected = new BehaviorSubject<any>(null);
   private voteReceived = new BehaviorSubject<any>(null);
@@ -43,6 +46,7 @@ export class SessionService {
     if (this.sessionId) {
       this.initBroadcastChannel();
       this.startConnectionCheck();
+      this.startHeartbeat();
     }
   }
 
@@ -89,31 +93,87 @@ export class SessionService {
       };
 
       if (!this.isHost && !this.isInitialized) {
-        this.performInitialSync();
+        this.detectHostAndSync();
         this.isInitialized = true;
       }
     }
   }
 
-  private performInitialSync(): void {
+  private detectHostAndSync(): void {
     this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
     this.syncTimeouts = [];
 
-    const delays = [100, 500, 1000, 2000, 3000, 5000, 8000, 12000, 15000, 20000, 25000, 30000, 40000, 50000, 60000];
-
-    delays.forEach((delay, index) => {
-      if (index < this.maxSyncTimeouts) {
-        const timeout = setTimeout(() => {
-          this.requestCurrentState();
-          this.broadcastEvent('need_issues_urgent', {
-            clientId: this.clientId,
-            timestamp: new Date().getTime(),
-            attempt: index + 1
-          });
-        }, delay);
-        this.syncTimeouts.push(timeout);
-      }
+    this.broadcastEvent('client_joined', {
+      clientId: this.clientId,
+      timestamp: new Date().getTime(),
+      needsFullSync: true
     });
+
+    const syncAttempts = [
+      100, 300, 600, 1000, 1500, 2000, 3000, 4000, 5000,
+      7000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 60000
+    ];
+
+    syncAttempts.forEach((delay, index) => {
+      const timeout = setTimeout(() => {
+        this.requestFullStateFromHost();
+      }, delay);
+      this.syncTimeouts.push(timeout);
+    });
+
+    this.hostDetectionTimeout = setTimeout(() => {
+      this.clearSyncTimeouts();
+    }, 10000);
+  }
+
+  private requestFullStateFromHost(): void {
+    const currentIssues = this.storageService.getStoredTickets();
+
+    this.broadcastEvent('request_full_state', {
+      clientId: this.clientId,
+      timestamp: new Date().getTime(),
+      currentIssuesCount: currentIssues.length,
+      hasIssues: currentIssues.length > 0,
+      urgent: true
+    });
+
+    this.broadcastEvent('ping', {
+      clientId: this.clientId,
+      timestamp: new Date().getTime(),
+      needsState: true
+    });
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+    }
+
+    this.heartbeatInterval = setInterval(() => {
+      if (this.isHost) {
+        const issues = this.storageService.getStoredTickets();
+        this.broadcastEvent('heartbeat', {
+          isHost: true,
+          timestamp: new Date().getTime(),
+          hasIssues: issues.length > 0,
+          issuesCount: issues.length,
+          sessionId: this.sessionId
+        });
+      } else {
+        const currentIssues = this.storageService.getStoredTickets();
+        this.broadcastEvent('heartbeat', {
+          isHost: false,
+          timestamp: new Date().getTime(),
+          hasIssues: currentIssues.length > 0,
+          issuesCount: currentIssues.length,
+          needsSync: currentIssues.length === 0
+        });
+
+        if (currentIssues.length === 0) {
+          this.requestFullStateFromHost();
+        }
+      }
+    }, 3000);
   }
 
   private startConnectionCheck(): void {
@@ -124,13 +184,10 @@ export class SessionService {
     this.connectionCheckInterval = setInterval(() => {
       if (!this.isHost) {
         const currentIssues = this.storageService.getStoredTickets();
-        if (currentIssues.length === 0) {
-          this.requestCurrentState();
-          this.broadcastEvent('need_issues_urgent', {
-            clientId: this.clientId,
-            timestamp: new Date().getTime(),
-            reason: 'no_issues_periodic_check'
-          });
+        const timeSinceLastHeartbeat = new Date().getTime() - this.lastHeartbeat;
+
+        if (currentIssues.length === 0 || timeSinceLastHeartbeat > 10000) {
+          this.requestFullStateFromHost();
         }
       } else {
         this.sendCurrentState();
@@ -150,14 +207,15 @@ export class SessionService {
         timestamp: new Date().getTime(),
         sender: {
           id: this.clientId,
-          isHost: this.isHost
+          isHost: this.isHost,
+          sessionId: this.sessionId
         }
       };
 
       try {
         this.broadcastChannel.postMessage(message);
 
-        if (['update_issues', 'full_state', 'need_issues_urgent'].includes(eventType)) {
+        if (['update_issues', 'full_state', 'request_full_state', 'client_joined'].includes(eventType)) {
           setTimeout(() => {
             if (this.broadcastChannel) {
               this.broadcastChannel.postMessage(message);
@@ -170,7 +228,7 @@ export class SessionService {
             }
           }, 500);
 
-          if (eventType === 'update_issues' && this.isHost) {
+          if (eventType === 'full_state' && this.isHost) {
             setTimeout(() => {
               if (this.broadcastChannel) {
                 this.broadcastChannel.postMessage(message);
@@ -181,7 +239,7 @@ export class SessionService {
               if (this.broadcastChannel) {
                 this.broadcastChannel.postMessage(message);
               }
-            }, 3000);
+            }, 2000);
           }
         }
       } catch (error: unknown) {
@@ -203,16 +261,42 @@ export class SessionService {
       return;
     }
 
+    if (message.sender && message.sender.isHost) {
+      this.lastHeartbeat = new Date().getTime();
+    }
+
     switch(message.type) {
+      case 'client_joined':
+        if (this.isHost) {
+          setTimeout(() => this.sendCurrentState(), 100);
+          setTimeout(() => this.sendCurrentState(), 500);
+          setTimeout(() => this.sendCurrentState(), 1000);
+          setTimeout(() => this.sendCurrentState(), 2000);
+        }
+        break;
+
+      case 'heartbeat':
+        if (message.data.isHost && !this.isHost) {
+          this.lastHeartbeat = new Date().getTime();
+
+          const currentIssues = this.storageService.getStoredTickets();
+          if (currentIssues.length === 0 && message.data.hasIssues) {
+            this.requestFullStateFromHost();
+          }
+        } else if (!message.data.isHost && this.isHost) {
+          if (message.data.needsSync) {
+            this.sendCurrentState();
+          }
+        }
+        break;
+
       case 'vote':
         this.voteReceived.next(message.data);
         break;
 
       case 'reveal':
         this.revealTriggered.next(true);
-        setTimeout(() => {
-          this.revealTriggered.next(false);
-        }, 100);
+        setTimeout(() => this.revealTriggered.next(false), 100);
         break;
 
       case 'select_ticket':
@@ -228,29 +312,31 @@ export class SessionService {
 
       case 'reset_voting':
         this.resetVoting.next(true);
-        setTimeout(() => {
-          this.resetVoting.next(false);
-        }, 100);
+        setTimeout(() => this.resetVoting.next(false), 100);
         break;
 
-      case 'request_state':
-      case 'need_issues_urgent':
+      case 'request_full_state':
+      case 'ping':
         if (this.isHost) {
           this.sendCurrentState();
           setTimeout(() => this.sendCurrentState(), 100);
           setTimeout(() => this.sendCurrentState(), 500);
+          setTimeout(() => this.sendCurrentState(), 1000);
         }
         break;
 
       case 'full_state':
-        this.handleFullState(message.data);
+        if (!this.isHost) {
+          this.handleFullState(message.data);
+          this.clearSyncTimeouts();
+        }
         break;
 
       case 'force_sync':
         if (this.isHost) {
           setTimeout(() => this.sendCurrentState(), 100);
         } else {
-          setTimeout(() => this.requestCurrentState(), 100);
+          setTimeout(() => this.requestFullStateFromHost(), 100);
         }
         break;
 
@@ -264,20 +350,24 @@ export class SessionService {
         }
         break;
 
-      case 'ping':
-        if (this.isHost) {
-          this.broadcastEvent('pong', {
-            timestamp: new Date().getTime(),
-            hasIssues: this.storageService.getStoredTickets().length > 0
-          });
-        }
-        break;
-
       case 'pong':
-        if (message.data.hasIssues && this.storageService.getStoredTickets().length === 0) {
-          this.requestCurrentState();
+        if (!this.isHost && message.data.hasIssues) {
+          const currentIssues = this.storageService.getStoredTickets();
+          if (currentIssues.length === 0) {
+            this.requestFullStateFromHost();
+          }
         }
         break;
+    }
+  }
+
+  private clearSyncTimeouts(): void {
+    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.syncTimeouts = [];
+
+    if (this.hostDetectionTimeout) {
+      clearTimeout(this.hostDetectionTimeout);
+      this.hostDetectionTimeout = null;
     }
   }
 
@@ -296,12 +386,7 @@ export class SessionService {
         this.lastSyncTimestamp = data.timestamp || new Date().getTime();
         this.storageService.storeTickets(data.issues);
         this.issuesUpdated.next([...data.issues]);
-
-        setTimeout(() => this.issuesUpdated.next([...data.issues]), 100);
-        setTimeout(() => this.issuesUpdated.next([...data.issues]), 500);
-
-        this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-        this.syncTimeouts = [];
+        this.clearSyncTimeouts();
       }
     }
   }
@@ -317,7 +402,8 @@ export class SessionService {
       selectedTicket: selectedTicket,
       timestamp: new Date().getTime(),
       forceUpdate: true,
-      sender: 'host_state_broadcast'
+      sender: 'host_state_broadcast',
+      sessionId: this.sessionId
     };
 
     this.broadcastEvent('full_state', fullState);
@@ -333,7 +419,9 @@ export class SessionService {
   }
 
   private handleFullState(state: any): void {
-    if (!state) return;
+    if (!state) {
+      return;
+    }
 
     if (state.gameName && state.gameName !== this.gameService.getGameName()) {
       this.gameService.setGameName(state.gameName);
@@ -346,22 +434,12 @@ export class SessionService {
     const currentIssues = this.storageService.getStoredTickets();
 
     if (state.issues && Array.isArray(state.issues) && state.issues.length > 0) {
-      if (state.forceUpdate ||
-        currentIssues.length === 0 ||
-        state.issues.length !== currentIssues.length ||
-        !state.timestamp ||
-        state.timestamp > this.lastSyncTimestamp) {
+      this.lastSyncTimestamp = state.timestamp || new Date().getTime();
+      this.storageService.storeTickets(state.issues);
+      this.issuesUpdated.next([...state.issues]);
 
-        this.lastSyncTimestamp = state.timestamp || new Date().getTime();
-        this.storageService.storeTickets(state.issues);
-        this.issuesUpdated.next([...state.issues]);
-
-        setTimeout(() => this.issuesUpdated.next([...state.issues]), 100);
-        setTimeout(() => this.issuesUpdated.next([...state.issues]), 500);
-
-        this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-        this.syncTimeouts = [];
-      }
+      setTimeout(() => this.issuesUpdated.next([...state.issues]), 100);
+      setTimeout(() => this.issuesUpdated.next([...state.issues]), 500);
     }
 
     if (state.selectedTicket) {
@@ -391,6 +469,7 @@ export class SessionService {
 
           this.initBroadcastChannel();
           this.startConnectionCheck();
+          this.startHeartbeat();
 
           if (gameNameParam) {
             this.gameService.setGameName(decodeURIComponent(gameNameParam));
@@ -400,45 +479,27 @@ export class SessionService {
             this.gameService.setGameType(decodeURIComponent(gameTypeParam));
           }
 
-          this.requestCurrentStateWithRetry();
+          this.requestStateWithAggressiveRetry();
         }
         resolve();
       });
     });
   }
 
-  private requestCurrentState(): void {
-    this.broadcastEvent('request_state', {
-      timestamp: new Date().getTime(),
-      clientId: this.clientId,
-      requestIssues: true,
-      reason: 'manual_request'
-    });
-
-    this.broadcastEvent('ping', {
-      timestamp: new Date().getTime(),
-      clientId: this.clientId
-    });
-  }
-
-  private requestCurrentStateWithRetry(): void {
+  private requestStateWithAggressiveRetry(): void {
     this.syncRetryCount = 0;
     this.requestStateWithBackoff();
   }
 
   private requestStateWithBackoff(): void {
-    this.requestCurrentState();
-    this.broadcastEvent('need_issues_urgent', {
-      clientId: this.clientId,
-      timestamp: new Date().getTime(),
-      attempt: this.syncRetryCount + 1
-    });
+    this.requestFullStateFromHost();
 
     if (this.syncRetryCount < this.maxSyncRetries) {
+      const delay = Math.min(1000 * Math.pow(1.3, this.syncRetryCount), 8000);
       setTimeout(() => {
         this.syncRetryCount++;
         this.requestStateWithBackoff();
-      }, Math.min(1000 * Math.pow(1.5, this.syncRetryCount), 10000));
+      }, delay);
     }
   }
 
@@ -480,8 +541,7 @@ export class SessionService {
   }
 
   public resetSession(): void {
-    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-    this.syncTimeouts = [];
+    this.clearSyncTimeouts();
 
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
@@ -489,6 +549,10 @@ export class SessionService {
 
     if (this.connectionCheckInterval) {
       clearInterval(this.connectionCheckInterval);
+    }
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
     }
 
     localStorage.removeItem('sessionId');
@@ -502,11 +566,11 @@ export class SessionService {
 
     this.initBroadcastChannel();
     this.startConnectionCheck();
+    this.startHeartbeat();
   }
 
   ngOnDestroy(): void {
-    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-    this.syncTimeouts = [];
+    this.clearSyncTimeouts();
 
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
@@ -514,6 +578,10 @@ export class SessionService {
 
     if (this.connectionCheckInterval) {
       clearInterval(this.connectionCheckInterval);
+    }
+
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
     }
   }
 }

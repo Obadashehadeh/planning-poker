@@ -842,3 +842,164 @@ app-invitation-modal {
   font-size: 14px;
   color: #666;
 }
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-text {
+    white-space: nowrap;
+  }
+
+  &.status-connected {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+
+    .status-indicator svg {
+      color: #4caf50;
+    }
+  }
+
+  &.status-syncing {
+    background-color: #fff3e0;
+    color: #ef6c00;
+    border: 1px solid #ffcc02;
+
+    .status-indicator svg {
+      color: #ff9800;
+    }
+  }
+
+  &.status-disconnected {
+    background-color: #ffebee;
+    color: #c62828;
+    border: 1px solid #ffcdd2;
+
+    .status-indicator svg {
+      color: #f44336;
+    }
+  }
+}
+
+.retry-btn {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: #d32f2f;
+  }
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.issues-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #666;
+
+  .client-indicator,
+  .host-indicator {
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .client-indicator {
+    background-color: #e3f2fd;
+    color: #1976d2;
+  }
+
+  .host-indicator {
+    background-color: #e8f5e9;
+    color: #388e3c;
+  }
+}
+
+.sync-btn {
+  background-color: #2196F3;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+  margin-right: 12px;
+  border: none;
+  cursor: pointer;
+
+  &:hover {
+    background-color: #1976D2;
+    transform: translateY(-1px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+
+  svg {
+    fill: currentColor;
+    transition: transform 0.2s;
+  }
+
+  &:hover svg {
+    transform: rotate(180deg);
+  }
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 24px;
+  background-color: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+  flex-wrap: wrap;
+  gap: 16px;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+
+    .header-right {
+      justify-content: space-between;
+    }
+
+    .connection-status {
+      order: -1;
+      align-self: center;
+    }
+  }
+}

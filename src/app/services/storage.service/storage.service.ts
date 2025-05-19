@@ -5,6 +5,7 @@ interface JiraTicket {
   Summary: string;
   Status: string;
   Assignee: string;
+  Description: string;
   'Story point': number | string;
 }
 
@@ -82,6 +83,7 @@ export class StorageService {
         Summary: ticket.Summary || '',
         Status: ticket.Status || 'To Do',
         Assignee: ticket.Assignee || '',
+        Description: ticket.Description || '',
         'Story point': ticket['Story point'] || ''
       }));
 
@@ -286,6 +288,5 @@ export class StorageService {
   }
 
   private handleStorageError(method: string, error: unknown): void {
-    // Silent error handling - could be enhanced with proper logging service
   }
 }

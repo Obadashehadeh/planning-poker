@@ -17,6 +17,7 @@ interface JiraTicket {
   Summary: string;
   Status: string;
   Assignee: string;
+  Description: string;
   'Story point': number | string;
 }
 
@@ -119,21 +120,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         this.loadSavedTickets();
         this.loadSelectedTicket();
       } else {
-        setTimeout(() => {
-          this.loadSavedTickets();
-          this.loadSelectedTicket();
+        this.loadSavedTickets();
+        this.loadSelectedTicket();
 
-          if (this.specificData.length === 0) {
-            this.sessionService.forceSyncAllClients();
-          }
-        }, 1000);
-
-        setTimeout(() => {
-          const currentIssues = this.storageService.getStoredTickets();
-          if (currentIssues.length === 0) {
-            this.sessionService.forceSyncAllClients();
-          }
-        }, 3000);
+        if (this.specificData.length === 0) {
+          await this.waitForInitialSync();
+        }
       }
 
       this.subscribeToSessionEvents();
@@ -142,16 +134,32 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         this.submitDisplayName();
       }
 
-      if (!this.isHost) {
-        this.startPeriodicSync();
-        this.requestInitialSync();
-      }
-
       this.connectionStatus = 'connected';
     } catch (error: unknown) {
       this.connectionStatus = 'disconnected';
       this.retryInitialization();
     }
+  }
+  private async waitForInitialSync(): Promise<void> {
+    return new Promise((resolve) => {
+      const maxWaitTime = 15000;
+      const checkInterval = 1000;
+      let elapsedTime = 0;
+
+      const interval = setInterval(() => {
+        const currentTickets = this.storageService.getStoredTickets();
+        elapsedTime += checkInterval;
+
+        if (currentTickets.length > 0) {
+          this.specificData = [...currentTickets];
+          clearInterval(interval);
+          resolve();
+        } else if (elapsedTime >= maxWaitTime) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, checkInterval);
+    });
   }
 
   private retryInitialization(): void {
@@ -205,12 +213,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.register = false;
       this.overlay = false;
       this.storageService.setDisplayName(this.displayName);
-
       this.sessionService.broadcastEvent('user_joined', {
         user: this.displayName,
         timestamp: new Date().getTime(),
         needsSync: !this.isHost,
-        clientId: this.generateClientId()
+        clientId: this.generateClientId(),
+        isHost: this.isHost
       });
 
       if (!this.isHost) {
@@ -225,6 +233,13 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         setTimeout(() => {
           this.sessionService.forceSyncAllClients();
         }, 5000);
+
+        setTimeout(() => {
+          const currentTickets = this.storageService.getStoredTickets();
+          if (currentTickets.length > 0) {
+            this.specificData = [...currentTickets];
+          }
+        }, 3000);
       }
     }
   }
@@ -323,12 +338,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     if (this.specificData.length > 0) {
       const timestamp = new Date().getTime();
       const issuesClone = this.specificData.map(issue => ({ ...issue }));
-
       this.sessionService.broadcastEvent('update_issues', {
         issues: issuesClone,
         timestamp: timestamp,
         forceUpdate: true,
         source: 'broadcast_updated'
+      });
+
+      this.sessionService.broadcastEvent('full_state', {
+        gameName: this.gameService.getGameName(),
+        gameType: this.gameService.getGameType(),
+        issues: issuesClone,
+        selectedTicket: this.selectedTicket,
+        timestamp: timestamp,
+        forceUpdate: true,
+        source: 'broadcast_updated_full'
       });
 
       setTimeout(() => {
@@ -341,8 +365,11 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }, 500);
 
       setTimeout(() => {
-        this.sessionService.broadcastEvent('update_issues', {
+        this.sessionService.broadcastEvent('full_state', {
+          gameName: this.gameService.getGameName(),
+          gameType: this.gameService.getGameType(),
           issues: issuesClone,
+          selectedTicket: this.selectedTicket,
           timestamp: timestamp,
           forceUpdate: true,
           source: 'broadcast_updated_retry2'
@@ -509,6 +536,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       Summary: row.Summary || '',
       Status: row.Status || 'To Do',
       Assignee: row.Assignee || '',
+      Description: row.Description || '',
       'Story point': row['Story point'] || ''
     }));
 
@@ -522,19 +550,28 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   private async broadcastIssuesWithRetry(retryCount: number = 0): Promise<void> {
-    const maxRetries = 10;
-    const baseDelay = 500;
+    const maxRetries = 15;
+    const baseDelay = 300;
 
     if (this.specificData.length > 0) {
       const timestamp = new Date().getTime();
       const issuesClone = this.specificData.map(issue => ({ ...issue }));
-
       this.sessionService.broadcastEvent('update_issues', {
         issues: issuesClone,
         timestamp: timestamp,
         forceUpdate: true,
         source: 'file_upload',
         retryCount: retryCount
+      });
+
+      this.sessionService.broadcastEvent('full_state', {
+        gameName: this.gameService.getGameName(),
+        gameType: this.gameService.getGameType(),
+        issues: issuesClone,
+        selectedTicket: this.selectedTicket,
+        timestamp: timestamp,
+        forceUpdate: true,
+        source: 'file_upload_full_state'
       });
 
       this.sessionService.forceSyncAllClients();
@@ -665,11 +702,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.subscriptions.push(
       this.sessionService.issuesUpdated$.subscribe(issues => {
         if (issues && Array.isArray(issues) && issues.length > 0) {
+          const currentCount = this.specificData.length;
           this.specificData = [...issues];
           this.storageService.storeTickets(this.specificData);
-          this.initialSyncCompleted = true;
           this.connectionStatus = 'connected';
-
           if (!this.selectedTicket && issues.length > 0) {
             const savedTicket = this.storageService.getSelectedTicket();
             if (savedTicket) {
@@ -682,7 +718,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         }
       })
     );
-
     this.subscriptions.push(
       this.sessionService.ticketSelected$.subscribe(data => {
         if (data && data.ticket) {
@@ -727,35 +762,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.subscriptions.push(
       this.sessionService.userJoined$.subscribe(user => {
         if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => {
-            this.broadcastUpdatedIssues();
-          }, 100);
-
-          setTimeout(() => {
-            this.broadcastUpdatedIssues();
-          }, 1000);
-
-          setTimeout(() => {
-            this.broadcastUpdatedIssues();
-          }, 3000);
-
-          setTimeout(() => {
-            this.sessionService.broadcastEvent('full_state', {
-              gameName: this.gameService.getGameName(),
-              gameType: this.gameService.getGameType(),
-              issues: this.specificData.map(issue => ({ ...issue })),
-              selectedTicket: this.selectedTicket,
-              timestamp: new Date().getTime(),
-              forceUpdate: true
-            });
-          }, 2000);
+          setTimeout(() => this.broadcastUpdatedIssues(), 100);
+          setTimeout(() => this.broadcastUpdatedIssues(), 500);
+          setTimeout(() => this.broadcastUpdatedIssues(), 1000);
+          setTimeout(() => this.broadcastUpdatedIssues(), 2000);
+          setTimeout(() => this.broadcastUpdatedIssues(), 5000);
         }
       })
     );
   }
 
   async syncIssuesManually(): Promise<void> {
-    debugger
     if (this.syncInProgress) return;
 
     this.syncInProgress = true;
@@ -776,13 +793,35 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         this.sessionService.broadcastEvent('request_state', {
           timestamp: new Date().getTime(),
           needsIssues: true,
-          manualSync: true
+          manualSync: true,
+          clientId: this.generateClientId()
+        });
+        this.sessionService.broadcastEvent('client_joined', {
+          clientId: this.generateClientId(),
+          timestamp: new Date().getTime(),
+          needsFullSync: true,
+          manualRequest: true
         });
 
         this.sessionService.forceSyncAllClients();
+        await new Promise(resolve => {
+          let attempts = 0;
+          const checkInterval = setInterval(() => {
+            const currentTickets = this.storageService.getStoredTickets();
+            attempts++;
+
+            if (currentTickets.length > 0 || attempts >= 10) {
+              clearInterval(checkInterval);
+              if (currentTickets.length > 0) {
+                this.specificData = [...currentTickets];
+              }
+              resolve(true);
+            }
+          }, 500);
+        });
       }
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       this.connectionStatus = 'connected';
 
