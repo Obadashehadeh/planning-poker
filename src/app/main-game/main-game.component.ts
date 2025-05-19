@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, SimpleChanges, Input, HostListener } from '@angular/core';
+import { Component, OnInit, OnChanges, SimpleChanges, Input, HostListener, OnDestroy } from '@angular/core';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
@@ -9,8 +9,8 @@ import { InvitationService } from '../services/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
 import { SessionService } from '../services/session.service';
 import { ActivatedRoute } from '@angular/router';
-import { Subscription } from 'rxjs';
-import {GameService} from "../services/game.service/game.service";
+import { Subscription, interval } from 'rxjs';
+import { GameService } from "../services/game.service/game.service";
 
 interface JiraTicket {
   Key: string;
@@ -27,7 +27,7 @@ interface JiraTicket {
   standalone: true,
   imports: [FormsModule, CommonModule, ReactiveFormsModule, InvitationModalComponent],
 })
-export class MainGameComponent implements OnInit, OnChanges {
+export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   @Input() selectedCard: number = 0;
   gameName: string | null = '';
   gameType: string = '';
@@ -54,8 +54,14 @@ export class MainGameComponent implements OnInit, OnChanges {
   isOpenInvitationModal = false;
   selectedTicket: JiraTicket | null = null;
   fileUploadError: string = '';
+  activeTab: string = 'unvoted';
+  isHost: boolean = true;
+  syncInProgress: boolean = false;
+  connectionStatus: 'connected' | 'disconnected' | 'syncing' = 'connected';
   private subscriptions: Subscription[] = [];
-  public  participantVotes: {[key: string]: number} = {};
+  private syncInterval: any;
+  private initialSyncCompleted: boolean = false;
+  public participantVotes: { [key: string]: number } = {};
   public Object = Object;
 
   constructor(
@@ -72,40 +78,128 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   ngOnInit(): void {
-    this.sessionService.checkUrlForSession();
-    this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
-    const storedDisplayName = this.storageService.getDisplayName();
-
-    if (storedDisplayName) {
-      this.displayNameEntered = true;
-      this.register = false;
-      this.overlay = false;
-      this.displayName = storedDisplayName;
-    }
-
-    this.gameName = this.gameService.getGameName() || 'Planning Poker Game';
-
-    this.gameService.gameName$.subscribe((gameName) => {
-      this.gameName = gameName || 'Planning Poker Game';
-    });
-
-    if (this.displayName) {
-      this.submitDisplayName();
-    }
-
-    this.initializeCardList();
-
-    this.loadSavedTickets();
-    const savedTicket = this.storageService.getSelectedTicket();
-    if (savedTicket) {
-      this.selectedTicket = savedTicket;
-    }
-    this.subscribeToSessionEvents();
+    this.initializeComponent();
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['selectedCard'] && !changes['selectedCard'].firstChange) {
       this.storageService.storeLastClickedCard(this.selectedCard);
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.cleanup();
+  }
+
+  private async initializeComponent(): Promise<void> {
+    try {
+      // Check URL parameters first for session joining
+      this.route.queryParams.subscribe(params => {
+        if (params['session']) {
+          this.isHost = false;
+          this.connectionStatus = 'syncing';
+        }
+      });
+
+      await this.sessionService.checkUrlForSession();
+
+      // Initialize game settings
+      this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
+      this.initializeCardList();
+
+      // Handle display name
+      const storedDisplayName = this.storageService.getDisplayName();
+      if (storedDisplayName) {
+        this.displayNameEntered = true;
+        this.register = false;
+        this.overlay = false;
+        this.displayName = storedDisplayName;
+      }
+
+      // Set game name
+      this.gameName = this.gameService.getGameName() || 'Planning Poker Game';
+
+      // Subscribe to game name changes
+      this.subscriptions.push(
+        this.gameService.gameName$.subscribe((gameName) => {
+          this.gameName = gameName || 'Planning Poker Game';
+        })
+      );
+
+      // Load saved data
+      this.loadSavedTickets();
+      this.loadSelectedTicket();
+
+      // Determine host status
+      this.isHost = this.sessionService.isSessionHost();
+
+      // Subscribe to session events
+      this.subscribeToSessionEvents();
+
+      // Auto-submit display name if available
+      if (this.displayName) {
+        this.submitDisplayName();
+      }
+
+      // Start periodic sync for non-host
+      if (!this.isHost) {
+        this.startPeriodicSync();
+        this.requestInitialSync();
+      }
+
+      this.connectionStatus = 'connected';
+    } catch (error) {
+      this.connectionStatus = 'disconnected';
+      this.retryInitialization();
+    }
+  }
+
+  private retryInitialization(): void {
+    setTimeout(() => {
+      this.initializeComponent();
+    }, 2000);
+  }
+
+  private startPeriodicSync(): void {
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
+    }
+
+    // Check for data every 3 seconds if we don't have any
+    this.syncInterval = setInterval(() => {
+      if (!this.initialSyncCompleted || this.specificData.length === 0) {
+        this.sessionService.forceSyncAllClients();
+      }
+    }, 3000);
+  }
+
+  private requestInitialSync(): void {
+    // Multiple attempts to get initial data
+    const attempts = [500, 1500, 3000, 5000, 8000];
+
+    attempts.forEach(delay => {
+      setTimeout(() => {
+        if (!this.initialSyncCompleted) {
+          this.sessionService.broadcastEvent('request_state', {
+            timestamp: new Date().getTime(),
+            needsIssues: true
+          });
+        }
+      }, delay);
+    });
+  }
+
+  private loadSelectedTicket(): void {
+    const savedTicket = this.storageService.getSelectedTicket();
+    if (savedTicket) {
+      this.selectedTicket = savedTicket;
+    }
+  }
+
+  private cleanup(): void {
+    this.subscriptions.forEach(sub => sub.unsubscribe());
+    if (this.syncInterval) {
+      clearInterval(this.syncInterval);
     }
   }
 
@@ -115,6 +209,19 @@ export class MainGameComponent implements OnInit, OnChanges {
       this.register = false;
       this.overlay = false;
       this.storageService.setDisplayName(this.displayName);
+
+      this.sessionService.broadcastEvent('user_joined', {
+        user: this.displayName,
+        timestamp: new Date().getTime(),
+        needsSync: !this.isHost
+      });
+
+      // Request data after joining if not host
+      if (!this.isHost) {
+        setTimeout(() => {
+          this.sessionService.forceSyncAllClients();
+        }, 1000);
+      }
     }
   }
 
@@ -137,7 +244,8 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.storageService.storeLastClickedCard(card);
     this.sessionService.broadcastEvent('vote', {
       card: card,
-      user: this.displayName
+      user: this.displayName,
+      timestamp: new Date().getTime()
     });
   }
 
@@ -150,9 +258,12 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.countdownStarted = true;
     this.countdownInProgress = true;
     this.countdownValue = 3;
+
     this.sessionService.broadcastEvent('reveal', {
-      ticketKey: this.selectedTicket.Key
+      ticketKey: this.selectedTicket.Key,
+      timestamp: new Date().getTime()
     });
+
     this.updateCountdown();
   }
 
@@ -181,13 +292,42 @@ export class MainGameComponent implements OnInit, OnChanges {
 
     if (this.selectedTicket) {
       this.sessionService.broadcastEvent('reset_voting', {
-        ticketKey: this.selectedTicket.Key
+        ticketKey: this.selectedTicket.Key,
+        timestamp: new Date().getTime()
       });
 
       this.updateTicketEstimate(this.selectedTicket, this.average);
       this.saveTickets();
+      this.broadcastUpdatedIssues();
     } else {
-      this.sessionService.broadcastEvent('reset_voting', {});
+      this.sessionService.broadcastEvent('reset_voting', {
+        timestamp: new Date().getTime()
+      });
+    }
+  }
+
+  private broadcastUpdatedIssues(): void {
+    if (this.specificData.length > 0) {
+      const timestamp = new Date().getTime();
+
+      // Broadcast multiple times to ensure delivery
+      this.sessionService.broadcastEvent('update_issues', {
+        issues: this.specificData.map(issue => ({ ...issue })),
+        timestamp: timestamp,
+        forceUpdate: true,
+        source: 'broadcast_updated'
+      });
+
+      setTimeout(() => {
+        this.sessionService.broadcastEvent('update_issues', {
+          issues: this.specificData.map(issue => ({ ...issue })),
+          timestamp: timestamp,
+          forceUpdate: true,
+          source: 'broadcast_updated_retry'
+        });
+      }, 1000);
+
+      this.sessionService.forceSyncAllClients();
     }
   }
 
@@ -222,7 +362,23 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
 
-  onFileChange(event: any): void {
+  setActiveTab(tab: string): void {
+    this.activeTab = tab;
+  }
+
+  getUnvotedIssues(): JiraTicket[] {
+    return this.specificData.filter(issue => !issue['Story point'] || issue['Story point'] === '');
+  }
+
+  getVotedIssues(): JiraTicket[] {
+    return this.specificData.filter(issue => issue['Story point'] && issue['Story point'] !== '');
+  }
+
+  getFilteredIssues(): JiraTicket[] {
+    return this.activeTab === 'voted' ? this.getVotedIssues() : this.getUnvotedIssues();
+  }
+
+  async onFileChange(event: any): Promise<void> {
     this.fileUploadError = '';
     const target: DataTransfer = <DataTransfer>event.target;
 
@@ -240,64 +396,70 @@ export class MainGameComponent implements OnInit, OnChanges {
 
     const fileButton = document.querySelector('.file-upload-btn') as HTMLElement;
     const originalText = fileButton?.textContent || 'Import from Excel';
-    if (fileButton) {
-      fileButton.textContent = 'Processing...';
-    }
 
-    const reader: FileReader = new FileReader();
-
-    reader.onload = (e: any) => {
-      try {
-        const binaryData: string = e.target.result;
-        const workbook: XLSX.WorkBook = XLSX.read(binaryData, {
-          type: 'binary',
-          cellDates: true,
-          cellStyles: true
-        });
-
-        if (workbook.SheetNames.length === 0) {
-          this.fileUploadError = 'The Excel file contains no sheets';
-          return;
-        }
-
-        const sheetName: string = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-
-        this.uploadedData = XLSX.utils.sheet_to_json(sheet);
-
-        if (this.uploadedData.length === 0) {
-          this.fileUploadError = 'No data found in the Excel file';
-          return;
-        }
-
-        this.processUploadedData();
-
-        if (fileButton) {
-          fileButton.textContent = 'File Imported!';
-          setTimeout(() => {
-            fileButton.textContent = originalText;
-          }, 3000);
-        }
-
-        event.target.value = '';
-
-      } catch (error) {
-        this.fileUploadError = 'Error processing Excel file. Please check the file format.';
-
-        if (fileButton) {
-          fileButton.textContent = originalText;
-        }
+    try {
+      if (fileButton) {
+        fileButton.textContent = 'Processing...';
       }
-    };
 
-    reader.onerror = () => {
-      this.fileUploadError = 'Error reading file';
+      const data = await this.readExcelFile(file);
+      await this.processUploadedData(data);
+
+      if (fileButton) {
+        fileButton.textContent = 'File Imported!';
+        setTimeout(() => {
+          fileButton.textContent = originalText;
+        }, 3000);
+      }
+
+      event.target.value = '';
+    } catch (error) {
+      this.fileUploadError = 'Error processing Excel file. Please check the file format.';
       if (fileButton) {
         fileButton.textContent = originalText;
       }
-    };
+    }
+  }
 
-    reader.readAsBinaryString(file);
+  private readExcelFile(file: File): Promise<any[]> {
+    return new Promise((resolve, reject) => {
+      const reader: FileReader = new FileReader();
+
+      reader.onload = (e: any) => {
+        try {
+          const binaryData: string = e.target.result;
+          const workbook: XLSX.WorkBook = XLSX.read(binaryData, {
+            type: 'binary',
+            cellDates: true,
+            cellStyles: true
+          });
+
+          if (workbook.SheetNames.length === 0) {
+            reject(new Error('The Excel file contains no sheets'));
+            return;
+          }
+
+          const sheetName: string = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          const data = XLSX.utils.sheet_to_json(sheet);
+
+          if (data.length === 0) {
+            reject(new Error('No data found in the Excel file'));
+            return;
+          }
+
+          resolve(data);
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Error reading file'));
+      };
+
+      reader.readAsBinaryString(file);
+    });
   }
 
   private isValidExcelFile(file: File): boolean {
@@ -312,55 +474,71 @@ export class MainGameComponent implements OnInit, OnChanges {
       file.name.endsWith('.xls');
   }
 
-  private processUploadedData(): void {
-    const missingColumns = this.validateRequiredColumns(this.uploadedData);
+  private async processUploadedData(uploadedData: any[]): Promise<void> {
+    const missingColumns = this.validateRequiredColumns(uploadedData);
 
     if (missingColumns.length > 0) {
       this.fileUploadError = `Missing required columns: ${missingColumns.join(', ')}`;
       return;
     }
 
-    this.specificData = this.uploadedData.map((row: any) => {
-      const ticket: JiraTicket = {
-        Key: row.Key || '',
-        Summary: row.Summary || '',
-        Status: row.Status || 'To Do',
-        Assignee: row.Assignee || '',
-        'Story point': row['Story point'] || ''
-      };
-      return ticket;
-    });
+    this.specificData = uploadedData.map((row: any) => ({
+      Key: row.Key || '',
+      Summary: row.Summary || '',
+      Status: row.Status || 'To Do',
+      Assignee: row.Assignee || '',
+      'Story point': row['Story point'] || ''
+    }));
 
     this.specificData.sort((a, b) => a.Key.localeCompare(b.Key));
-
     this.saveTickets();
-
-    this.broadcastIssuesWithRetry();
+    await this.broadcastIssuesWithRetry();
 
     if (window.innerWidth < 768) {
       setTimeout(() => this.isSidebarOpen = false, 1000);
     }
   }
 
-  private broadcastIssuesWithRetry(retryCount: number = 0): void {
-    const maxRetries = 3;
-    const retryDelay = 1000;
+  private async broadcastIssuesWithRetry(retryCount: number = 0): Promise<void> {
+    const maxRetries = 10;
+    const baseDelay = 500;
 
     if (this.specificData.length > 0) {
+      const timestamp = new Date().getTime();
+      const issuesClone = this.specificData.map(issue => ({ ...issue }));
+
+      // Immediate broadcast
       this.sessionService.broadcastEvent('update_issues', {
-        issues: this.specificData,
-        timestamp: new Date().getTime(),
-        forceUpdate: true
+        issues: issuesClone,
+        timestamp: timestamp,
+        forceUpdate: true,
+        source: 'file_upload',
+        retryCount: retryCount
       });
+
+      // Force sync
+      this.sessionService.forceSyncAllClients();
+
+      // Additional broadcasts with delays
+      setTimeout(() => {
+        this.sessionService.broadcastEvent('update_issues', {
+          issues: issuesClone,
+          timestamp: timestamp,
+          forceUpdate: true,
+          source: 'file_upload_delayed',
+          retryCount: retryCount
+        });
+      }, 1000);
 
       setTimeout(() => {
         this.sessionService.forceSyncAllClients();
-      }, 500);
+      }, 2000);
 
+      // Retry mechanism
       if (retryCount < maxRetries) {
         setTimeout(() => {
           this.broadcastIssuesWithRetry(retryCount + 1);
-        }, retryDelay * (retryCount + 1));
+        }, baseDelay * (retryCount + 1));
       }
     }
   }
@@ -381,7 +559,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   private loadSavedTickets(): void {
     const savedTickets = this.storageService.getStoredTickets();
     if (savedTickets && savedTickets.length > 0) {
-      this.specificData = savedTickets;
+      this.specificData = [...savedTickets];
     }
   }
 
@@ -392,11 +570,13 @@ export class MainGameComponent implements OnInit, OnChanges {
     this.cardsPicked = false;
     this.countdownFinished = false;
     this.selectedCard = 0;
+    this.participantVotes = {};
 
     this.sessionService.broadcastEvent('select_ticket', {
       ticket: this.selectedTicket,
       ticketKey: this.selectedTicket?.Key,
-      ticketSummary: this.selectedTicket?.Summary
+      ticketSummary: this.selectedTicket?.Summary,
+      timestamp: new Date().getTime()
     });
 
     if (window.innerWidth < 768) {
@@ -407,12 +587,12 @@ export class MainGameComponent implements OnInit, OnChanges {
   getTicketStatusClass(status: string): string {
     if (!status) return 'status-todo';
 
-    status = status.toLowerCase();
-    if (status.includes('open') || status.includes('to do') || status.includes('todo')) {
+    const normalizedStatus = status.toLowerCase();
+    if (normalizedStatus.includes('open') || normalizedStatus.includes('to do') || normalizedStatus.includes('todo')) {
       return 'status-todo';
-    } else if (status.includes('progress') || status.includes('doing') || status.includes('in dev')) {
+    } else if (normalizedStatus.includes('progress') || normalizedStatus.includes('doing') || normalizedStatus.includes('in dev')) {
       return 'status-progress';
-    } else if (status.includes('done') || status.includes('completed') || status.includes('closed')) {
+    } else if (normalizedStatus.includes('done') || normalizedStatus.includes('completed') || normalizedStatus.includes('closed')) {
       return 'status-done';
     }
     return 'status-todo';
@@ -424,13 +604,16 @@ export class MainGameComponent implements OnInit, OnChanges {
       return;
     }
 
-    const worksheet = XLSX.utils.json_to_sheet(this.specificData);
+    try {
+      const worksheet = XLSX.utils.json_to_sheet(this.specificData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Estimates');
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Estimates');
-
-    const filename = 'planning_poker_estimates_' + new Date().toISOString().slice(0, 10) + '.csv';
-    XLSX.writeFile(workbook, filename);
+      const filename = `planning_poker_estimates_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, filename);
+    } catch (error) {
+      alert('Error exporting file. Please try again.');
+    }
   }
 
   closeModel(): void {
@@ -438,7 +621,9 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   logout(): void {
+    this.cleanup();
     this.storageService.clearDisplayName();
+    this.sessionService.resetSession();
     this.router.navigate(['/create-game']);
   }
 
@@ -459,6 +644,7 @@ export class MainGameComponent implements OnInit, OnChanges {
   }
 
   private subscribeToSessionEvents(): void {
+    // Ticket selection events
     this.subscriptions.push(
       this.sessionService.ticketSelected$.subscribe(data => {
         if (data && data.ticket) {
@@ -466,16 +652,21 @@ export class MainGameComponent implements OnInit, OnChanges {
           this.cardsPicked = false;
           this.countdownFinished = false;
           this.selectedCard = 0;
+          this.participantVotes = {};
         }
       })
     );
+
+    // Vote events
     this.subscriptions.push(
       this.sessionService.voteReceived$.subscribe(data => {
-        if (data) {
+        if (data && data.user && data.card !== undefined) {
           this.participantVotes[data.user] = data.card;
         }
       })
     );
+
+    // Reveal events
     this.subscriptions.push(
       this.sessionService.revealTriggered$.subscribe(triggered => {
         if (triggered && !this.countdownStarted) {
@@ -484,15 +675,21 @@ export class MainGameComponent implements OnInit, OnChanges {
       })
     );
 
+    // Issues update events - CRITICAL FOR SYNC
     this.subscriptions.push(
       this.sessionService.issuesUpdated$.subscribe(issues => {
-        if (issues && issues.length > 0) {
-          this.specificData = [...issues];
+        if (issues && Array.isArray(issues) && issues.length > 0) {
+          // Update local data
+          this.specificData = issues.map(issue => ({ ...issue }));
 
-          setTimeout(() => {
-            this.specificData = [...issues];
-          }, 100);
+          // Save to localStorage
+          this.storageService.storeTickets(this.specificData);
 
+          // Mark initial sync as completed
+          this.initialSyncCompleted = true;
+          this.connectionStatus = 'connected';
+
+          // Update selected ticket if it exists in the new issues
           if (!this.selectedTicket && issues.length > 0) {
             const savedTicket = this.storageService.getSelectedTicket();
             if (savedTicket) {
@@ -506,53 +703,109 @@ export class MainGameComponent implements OnInit, OnChanges {
       })
     );
 
+    // Reset voting events
     this.subscriptions.push(
       this.sessionService.resetVoting$.subscribe(reset => {
         if (reset) {
-          this.finishCountdown();
+          this.countdownStarted = false;
+          this.countdownInProgress = false;
+          this.countdownFinished = false;
+          this.cardsPicked = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      })
+    );
+
+    // User joined events
+    this.subscriptions.push(
+      this.sessionService.userJoined$.subscribe(user => {
+        if (user && this.isHost && this.specificData.length > 0) {
+          // Send current state to new user
+          setTimeout(() => {
+            this.broadcastUpdatedIssues();
+          }, 1000);
+
+          // Send again after a delay to ensure delivery
+          setTimeout(() => {
+            this.sessionService.broadcastEvent('full_state', {
+              gameName: this.gameService.getGameName(),
+              gameType: this.gameService.getGameType(),
+              issues: this.specificData.map(issue => ({ ...issue })),
+              selectedTicket: this.selectedTicket,
+              timestamp: new Date().getTime()
+            });
+          }, 2000);
         }
       })
     );
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach(sub => sub.unsubscribe());
-  }
+  async syncIssuesManually(): Promise<void> {
+    if (this.syncInProgress) return;
 
-  syncIssuesManually(): void {
-    if (this.specificData.length > 0) {
-      const button = document.querySelector('.sync-btn span') as HTMLElement;
-      const originalText = button ? button.textContent : 'Sync Issues';
+    this.syncInProgress = true;
+    const button = document.querySelector('.sync-btn');
+    const buttonText = button?.querySelector('span') || button;
+    const originalText = buttonText?.textContent || 'Sync Issues';
 
-      if (button) {
-        button.textContent = 'Syncing...';
+    try {
+      if (buttonText) {
+        buttonText.textContent = 'Syncing...';
       }
 
-      this.sessionService.broadcastEvent('update_issues', {
-        issues: this.specificData,
-        timestamp: new Date().getTime(),
-        forceUpdate: true,
-        manualSync: true
-      });
+      this.connectionStatus = 'syncing';
 
-      this.sessionService.forceSyncAllClients();
+      if (this.isHost && this.specificData.length > 0) {
+        // Host broadcasts current data
+        await this.broadcastIssuesWithRetry();
+      } else {
+        // Client requests data from host
+        this.sessionService.broadcastEvent('request_state', {
+          timestamp: new Date().getTime(),
+          needsIssues: true,
+          manualSync: true
+        });
 
-      setTimeout(() => {
+        // Also force sync
         this.sessionService.forceSyncAllClients();
-      }, 1000);
+      }
 
-      setTimeout(() => {
-        this.sessionService.forceSyncAllClients();
-      }, 2000);
+      // Wait for sync to complete
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
-      setTimeout(() => {
-        if (button) {
-          button.textContent = 'Synced!';
-          setTimeout(() => {
-            button.textContent = originalText || 'Sync Issues';
-          }, 3000);
-        }
-      }, 1500);
+      this.connectionStatus = 'connected';
+
+      if (buttonText) {
+        buttonText.textContent = 'Synced!';
+        setTimeout(() => {
+          buttonText.textContent = originalText;
+        }, 3000);
+      }
+    } catch (error) {
+      this.connectionStatus = 'disconnected';
+      if (buttonText) {
+        buttonText.textContent = 'Sync Failed';
+        setTimeout(() => {
+          buttonText.textContent = originalText;
+        }, 3000);
+      }
+    } finally {
+      this.syncInProgress = false;
     }
+  }
+
+  getConnectionStatusClass(): string {
+    switch (this.connectionStatus) {
+      case 'connected': return 'status-connected';
+      case 'syncing': return 'status-syncing';
+      case 'disconnected': return 'status-disconnected';
+      default: return '';
+    }
+  }
+
+  retryConnection(): void {
+    this.connectionStatus = 'syncing';
+    this.initializeComponent();
   }
 }

@@ -16,6 +16,8 @@ export class StorageService {
   private selectedCardsKey = 'selectedCards';
   private ticketsKey = 'jiraTickets';
   private selectedTicketKey = 'selectedTicket';
+  private syncVersionKey = 'syncVersion';
+
   constructor() { }
 
   setDisplayName(displayName: string): void {
@@ -29,6 +31,7 @@ export class StorageService {
   clearDisplayName(): void {
     localStorage.removeItem(this.displayNameKey);
   }
+
   storeLastClickedCard(card: number): void {
     const selectedCards: number[] = JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
     selectedCards.push(card);
@@ -44,11 +47,26 @@ export class StorageService {
   }
 
   storeTickets(tickets: JiraTicket[]): void {
-    localStorage.setItem(this.ticketsKey, JSON.stringify(tickets));
+    try {
+      const ticketsToStore = Array.isArray(tickets) ? tickets : [];
+      localStorage.setItem(this.ticketsKey, JSON.stringify(ticketsToStore));
+      this.updateSyncVersion();
+    } catch (error) {
+      localStorage.removeItem(this.ticketsKey);
+      localStorage.setItem(this.ticketsKey, JSON.stringify([]));
+    }
   }
 
   getStoredTickets(): JiraTicket[] {
-    return JSON.parse(localStorage.getItem(this.ticketsKey) || '[]');
+    try {
+      const stored = localStorage.getItem(this.ticketsKey);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      localStorage.removeItem(this.ticketsKey);
+      return [];
+    }
   }
 
   updateTicketStoryPoints(ticketKey: string, storyPoints: number): void {
@@ -60,18 +78,47 @@ export class StorageService {
       this.storeTickets(tickets);
     }
   }
+
   setSelectedTicket(ticket: JiraTicket): void {
-    localStorage.setItem(this.selectedTicketKey, JSON.stringify(ticket));
+    try {
+      localStorage.setItem(this.selectedTicketKey, JSON.stringify(ticket));
+    } catch (error) {
+      localStorage.removeItem(this.selectedTicketKey);
+    }
   }
+
   getSelectedTicket(): JiraTicket | null {
-    const ticket = localStorage.getItem(this.selectedTicketKey);
-    return ticket ? JSON.parse(ticket) : null;
+    try {
+      const ticket = localStorage.getItem(this.selectedTicketKey);
+      return ticket ? JSON.parse(ticket) : null;
+    } catch (error) {
+      localStorage.removeItem(this.selectedTicketKey);
+      return null;
+    }
   }
 
   clearSelectedTicket(): void {
     localStorage.removeItem(this.selectedTicketKey);
   }
+
+  private updateSyncVersion(): void {
+    const currentVersion = parseInt(localStorage.getItem(this.syncVersionKey) || '0');
+    localStorage.setItem(this.syncVersionKey, (currentVersion + 1).toString());
+  }
+
+  getSyncVersion(): number {
+    return parseInt(localStorage.getItem(this.syncVersionKey) || '0');
+  }
+
   clearStoredData(): void {
     localStorage.clear();
+  }
+
+  forceRefreshTickets(): void {
+    const tickets = this.getStoredTickets();
+    this.storeTickets([]);
+    setTimeout(() => {
+      this.storeTickets(tickets);
+    }, 100);
   }
 }

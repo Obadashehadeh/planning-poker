@@ -35,23 +35,46 @@ export class InvitationModalComponent implements OnInit {
   }
 
   copyInvitationLink(): void {
-    const inputElement = this.invitationInput.nativeElement as HTMLInputElement;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(this.invitationUrl)
+        .then(() => {
+          this.handleCopySuccess();
+        })
+        .catch(() => {
+          this.fallbackCopyTextToClipboard();
+        });
+    } else {
+      this.fallbackCopyTextToClipboard();
+    }
+  }
 
+  private fallbackCopyTextToClipboard(): void {
+    const inputElement = this.invitationInput.nativeElement as HTMLInputElement;
     inputElement.select();
     inputElement.setSelectionRange(0, 99999);
 
-    navigator.clipboard.writeText(this.invitationUrl)
-      .then(() => {
+    try {
+      document.execCommand('copy');
+      this.handleCopySuccess();
+    } catch (err) {
+      const textArea = document.createElement('textarea');
+      textArea.value = this.invitationUrl;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+
+      try {
+        document.execCommand('copy');
         this.handleCopySuccess();
-      })
-      .catch(() => {
-        try {
-          document.execCommand('copy');
-          this.handleCopySuccess();
-        } catch (err) {
-          console.error('Failed to copy: ', err);
-        }
-      });
+      } catch (err) {
+        alert('Failed to copy the invitation link. Please copy it manually.');
+      }
+
+      document.body.removeChild(textArea);
+    }
   }
 
   private handleCopySuccess(): void {
@@ -64,7 +87,7 @@ export class InvitationModalComponent implements OnInit {
   selectInvitationLink(): void {
     const inputElement = this.invitationInput.nativeElement as HTMLInputElement;
     inputElement.select();
-    inputElement.setSelectionRange(0, 99999); // For mobile devices
+    inputElement.setSelectionRange(0, 99999);
   }
 
   private generateInvitationLink(): void {
