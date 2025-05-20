@@ -12,6 +12,7 @@ import { Subscription } from 'rxjs';
 import { GameService } from "../services/game.service/game.service";
 import { LocalStorageSyncService } from "../services/storage.service/localstorage-sync.service";
 import { SharedWorkerSyncService } from "../services/session.service/sharedworker-sync.service";
+import {WebSocketSyncService} from "../services/sync/websocket-sync.service";
 
 interface JiraTicket {
   Key: string;
@@ -63,6 +64,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     private sessionService: SessionService,
     private localStorageSyncService: LocalStorageSyncService,
     private sharedWorkerSyncService: SharedWorkerSyncService,
+    private webSocketService: WebSocketSyncService,
     private route: ActivatedRoute,
     private router: Router
   ) {
@@ -83,6 +85,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.webSocketService.disconnect();
   }
 
   private async initializeComponent(): Promise<void> {
@@ -748,7 +751,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       this.localStorageSyncService.requestSync();
       this.sharedWorkerSyncService.requestState();
-
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.requestFullState();
+      }
       this.sessionService.forceSyncAllClients();
     }
 
@@ -768,6 +773,13 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
   retryConnection(): void {
     this.connectionStatus = 'syncing';
+    if (this.displayNameEntered && this.displayName) {
+      this.webSocketService.connect(
+        this.sessionService.getSessionId() || 'default-room',
+        this.displayName,
+        this.isHost
+      );
+    }
     this.initializeComponent();
   }
 }
