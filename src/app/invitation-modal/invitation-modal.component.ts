@@ -93,6 +93,7 @@ export class InvitationModalComponent implements OnInit {
     const gameName = this.gameService.getGameName() || 'planning-poker-game';
     const gameType = this.gameService.getGameType();
 
+    // Create URL with game name and type
     this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}`;
   }
 }

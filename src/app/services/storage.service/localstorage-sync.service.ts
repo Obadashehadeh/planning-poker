@@ -29,12 +29,12 @@ export class LocalStorageSyncService {
   private eventsKey = 'poker-events';
   private currentVersion = 0;
   private lastSyncTime = 0;
-  private syncInterval = 500;
-  private hostElectionTimeout = 5000;
-  private cleanupInterval = 10000;
-  private eventCleanupTime = 5000;
+  private syncInterval = 500; // 500ms polling
+  private hostElectionTimeout = 5000; // 5 seconds
+  private cleanupInterval = 10000; // 10 seconds
+  private eventCleanupTime = 5000; // 5 seconds
 
-
+  // Observables for real-time updates
   private issuesUpdated = new BehaviorSubject<any[]>([]);
   private voteReceived = new BehaviorSubject<any>(null);
   private ticketSelected = new BehaviorSubject<any>(null);
@@ -46,59 +46,9 @@ export class LocalStorageSyncService {
   constructor() {
     this.clientId = this.generateClientId();
     this.initializeSync();
-  private generateClientId(): string {
-      const stored = localStorage.getItem('poker-client-id');
-      if (stored) return stored;
-
-      const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
-      localStorage.setItem('poker-client-id', id);
-      return id;
-    }
-
-  public isConnected(): boolean {
-      return this.connectionStatus.value === 'connected';
-    }
-
-  public getClientId(): string {
-      return this.clientId;
-    }
-
-  public isHostClient(): boolean {
-      return this.isHost;
-    }
-
-  public getConnectedClientsCount(): number {
-      const clients = this.getClients();
-      const activeClients = Object.values(clients).filter(
-        client => Date.now() - client.lastSeen < 30000
-      );
-      return activeClients.length;
-    }
-
-  public disconnect(): void {
-      const clients = this.getClients();
-      delete clients[this.clientId];
-      this.setClients(clients);
-
-      this.connectionStatus.next('disconnected');
-    }
-
-  public requestSync(): void {
-      if (this.isHost) {
-      const syncData = this.getSyncData();
-      if (syncData) {
-        syncData.version++;
-        syncData.timestamp = Date.now();
-        this.setSyncData(syncData);
-      }
-    } else {
-      this.broadcastEvent('request_sync', {
-        clientId: this.clientId,
-        needsFullSync: true
-      });
-    }
   }
-  }
+
+  // Public observables
   public get issuesUpdated$(): Observable<any[]> {
     return this.issuesUpdated.asObservable();
   }
@@ -128,20 +78,27 @@ export class LocalStorageSyncService {
   }
 
   private initializeSync(): void {
+    // Register this client
     this.registerClient();
 
+    // Listen for storage events from other tabs/windows
     window.addEventListener('storage', (event) => {
-      this.handleStorageChange(event);
+      if (event.key === this.syncKey || event.key === this.clientsKey || (event.key && event.key.startsWith('poker-event-'))) {
+        this.handleStorageChange(event);
+      }
     });
 
+    // Start periodic sync with other devices
     interval(this.syncInterval).subscribe(() => {
       this.performSync();
     });
 
+    // Host election on startup
     setTimeout(() => {
       this.performHostElection();
     }, 1000);
 
+    // Cleanup inactive clients every 10 seconds
     interval(this.cleanupInterval).subscribe(() => {
       this.cleanupInactiveClients();
       this.cleanupOldEvents();
@@ -163,6 +120,7 @@ export class LocalStorageSyncService {
     clients[this.clientId] = clientInfo;
     this.setClients(clients);
 
+    console.log(`Client ${this.clientId} registered`);
   }
 
   private performHostElection(): void {
@@ -172,10 +130,12 @@ export class LocalStorageSyncService {
     );
 
     if (activeClients.length === 0) {
+      // No active clients, become host
       this.becomeHost();
       return;
     }
 
+    // Sort by client ID to deterministically elect host
     activeClients.sort((a, b) => a.id.localeCompare(b.id));
     const electedHost = activeClients[0];
 
@@ -191,16 +151,20 @@ export class LocalStorageSyncService {
     this.isHost = true;
     const clients = this.getClients();
 
+    // Reset all clients' host status
     Object.values(clients).forEach(client => {
       client.isHost = false;
     });
 
+    // Set this client as host
     if (clients[this.clientId]) {
       clients[this.clientId].isHost = true;
     }
 
     this.setClients(clients);
     console.log(`Client ${this.clientId} became host`);
+
+    // Initialize sync data if not exists
     const syncData = this.getSyncData();
     if (!syncData) {
       this.setSyncData({
@@ -216,12 +180,11 @@ export class LocalStorageSyncService {
   }
 
   private handleStorageChange(event: StorageEvent): void {
-    if (!event.key) return;
-
     if (event.key === this.syncKey && event.newValue) {
       try {
         const syncData: SyncData = JSON.parse(event.newValue);
 
+        // Only process if this is newer data
         if (syncData.version > this.currentVersion) {
           this.processSyncData(syncData);
         }
@@ -229,8 +192,10 @@ export class LocalStorageSyncService {
         console.error('Error parsing sync data:', error);
       }
     } else if (event.key === this.clientsKey) {
+      // Handle client changes
       this.handleClientChange();
-    } else if (event.key.startsWith('poker-event-')) {
+    } else if (event.key && event.key.startsWith('poker-event-')) {
+      // Handle events
       try {
         if (event.newValue) {
           const eventData = JSON.parse(event.newValue);
@@ -245,8 +210,10 @@ export class LocalStorageSyncService {
   }
 
   private performSync(): void {
+    // Update this client's last seen time
     this.updateClientLastSeen();
 
+    // If not host, check for updates
     if (!this.isHost) {
       const syncData = this.getSyncData();
       if (syncData && syncData.version > this.currentVersion) {
@@ -254,17 +221,21 @@ export class LocalStorageSyncService {
       }
     }
 
+    // Check for events
     this.checkForEvents();
 
+    // Check if host is still active
     const clients = this.getClients();
     const hostClient = Object.values(clients).find(c => c.isHost);
 
     if (!hostClient || Date.now() - hostClient.lastSeen > this.hostElectionTimeout) {
+      console.log('Host inactive or missing, performing election');
       this.performHostElection();
     }
   }
 
   private checkForEvents(): void {
+    // Check for events in local storage
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key.startsWith('poker-event-')) {
@@ -308,6 +279,7 @@ export class LocalStorageSyncService {
     this.currentVersion = syncData.version;
     this.lastSyncTime = Date.now();
 
+    // Update issues if changed
     if (syncData.issues && syncData.issues.length > 0) {
       const currentIssues = this.issuesUpdated.value;
       if (JSON.stringify(currentIssues) !== JSON.stringify(syncData.issues)) {
@@ -315,9 +287,12 @@ export class LocalStorageSyncService {
       }
     }
 
+    // Update selected ticket if changed
     if (syncData.selectedTicket) {
       this.ticketSelected.next({ ticket: syncData.selectedTicket });
     }
+
+    console.log(`Synced data version ${syncData.version} from host ${syncData.hostId}`);
   }
 
   private updateClientLastSeen(): void {
@@ -331,19 +306,21 @@ export class LocalStorageSyncService {
   private cleanupInactiveClients(): void {
     const clients = this.getClients();
     const now = Date.now();
-    const timeout = 30000;
+    const timeout = 30000; // 30 seconds
 
     let hasChanges = false;
     Object.keys(clients).forEach(clientId => {
       if (now - clients[clientId].lastSeen > timeout) {
         delete clients[clientId];
         hasChanges = true;
+        console.log(`Removed inactive client: ${clientId}`);
       }
     });
 
     if (hasChanges) {
       this.setClients(clients);
 
+      // If we lost the host, elect a new one
       const remainingClients = Object.values(clients);
       const hasHost = remainingClients.some(c => c.isHost);
 
@@ -365,6 +342,7 @@ export class LocalStorageSyncService {
             localStorage.removeItem(key);
           }
         } catch (error) {
+          // Invalid event, remove it
           if (key) localStorage.removeItem(key);
         }
       }
@@ -375,22 +353,27 @@ export class LocalStorageSyncService {
     const clients = this.getClients();
     const hostClient = Object.values(clients).find(c => c.isHost);
 
+    // Check if host changed
     if (hostClient && hostClient.id !== this.clientId && this.isHost) {
+      console.log(`Another client became host: ${hostClient.id}`);
       this.isHost = false;
     }
   }
 
+  // Storage helpers
   private getSyncData(): SyncData | null {
     try {
       const data = localStorage.getItem(this.syncKey);
       return data ? JSON.parse(data) : null;
     } catch (error) {
+      console.error('Error reading sync data:', error);
       return null;
     }
   }
 
   private setSyncData(data: SyncData): void {
     try {
+      // Only host can write sync data
       if (!this.isHost) {
         console.warn('Non-host client attempted to write sync data');
         return;
@@ -408,6 +391,7 @@ export class LocalStorageSyncService {
       const data = localStorage.getItem(this.clientsKey);
       return data ? JSON.parse(data) : {};
     } catch (error) {
+      console.error('Error reading clients data:', error);
       return {};
     }
   }
@@ -420,6 +404,7 @@ export class LocalStorageSyncService {
     }
   }
 
+  // Public methods for sending updates
   public sendIssuesUpdate(issues: any[]): void {
     if (!this.isHost) {
       console.warn('Only host can update issues');
@@ -444,6 +429,7 @@ export class LocalStorageSyncService {
     const syncData = this.getSyncData();
     if (!syncData) return;
 
+    // Add vote to sync data
     const votes = syncData.votes || {};
     votes[this.clientId] = vote;
 
@@ -455,6 +441,7 @@ export class LocalStorageSyncService {
       this.setSyncData(syncData);
     }
 
+    // Broadcast event for real-time updates
     this.broadcastEvent('vote', vote);
     this.voteReceived.next(vote);
   }
@@ -468,7 +455,7 @@ export class LocalStorageSyncService {
     const syncData: SyncData = {
       issues: this.getSyncData()?.issues || [],
       selectedTicket: ticket,
-      votes: {},
+      votes: {}, // Clear votes when selecting new ticket
       timestamp: Date.now(),
       version: this.currentVersion + 1,
       hostId: this.clientId,
@@ -483,6 +470,7 @@ export class LocalStorageSyncService {
     this.revealTriggered.next(true);
     setTimeout(() => this.revealTriggered.next(false), 100);
 
+    // Broadcast via a temporary storage key
     this.broadcastEvent('reveal', {});
   }
 
@@ -526,6 +514,7 @@ export class LocalStorageSyncService {
         timestamp: Date.now()
       }));
 
+      // Clean up the event after a short delay
       setTimeout(() => {
         localStorage.removeItem(eventKey);
       }, this.eventCleanupTime);
@@ -533,3 +522,58 @@ export class LocalStorageSyncService {
       console.error('Error broadcasting event:', error);
     }
   }
+
+  private generateClientId(): string {
+    const stored = localStorage.getItem('poker-client-id');
+    if (stored) return stored;
+
+    const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
+    localStorage.setItem('poker-client-id', id);
+    return id;
+  }
+
+  public isConnected(): boolean {
+    return this.connectionStatus.value === 'connected';
+  }
+
+  public getClientId(): string {
+    return this.clientId;
+  }
+
+  public isHostClient(): boolean {
+    return this.isHost;
+  }
+
+  public getConnectedClientsCount(): number {
+    const clients = this.getClients();
+    const activeClients = Object.values(clients).filter(
+      client => Date.now() - client.lastSeen < 30000
+    );
+    return activeClients.length;
+  }
+
+  public disconnect(): void {
+    const clients = this.getClients();
+    delete clients[this.clientId];
+    this.setClients(clients);
+
+    this.connectionStatus.next('disconnected');
+  }
+
+  public requestSync(): void {
+    if (this.isHost) {
+      const syncData = this.getSyncData();
+      if (syncData) {
+        syncData.version++;
+        syncData.timestamp = Date.now();
+        this.setSyncData(syncData);
+      }
+    } else {
+      // Non-host clients broadcast a request for sync
+      this.broadcastEvent('request_sync', {
+        clientId: this.clientId,
+        needsFullSync: true
+      });
+    }
+  }
+}
