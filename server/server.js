@@ -3,6 +3,17 @@ const http = require('http');
 const port = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
+  // Add CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Planning Poker WebSocket Server is running');
 });
@@ -400,6 +411,6 @@ setInterval(() => {
   });
 }, 60 * 60 * 1000); // Check every hour
 
-server.listen(port, () => {
-  console.log(`WebSocket server is running on port ${port}`);
+server.listen(port, '0.0.0.0',() => {
+  console.log(`WebSocket server is running on 0.0.0.0:${port}`);
 });

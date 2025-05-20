@@ -82,17 +82,37 @@ export class SyncService {
   }
 
   private connectToServer(): void {
-    if (!this.roomId) return;
+    if (!this.roomId) {
+      console.error("Cannot connect: roomId is null");
+      return;
+    }
 
     try {
       const serverUrl = environment.websocketUrl;
+      console.log(`Attempting to connect to WebSocket server at: ${serverUrl}`);
       this.socket = new WebSocket(serverUrl);
 
-      this.socket.onopen = () => this.handleSocketOpen();
-      this.socket.onmessage = (event) => this.handleSocketMessage(event);
-      this.socket.onclose = (event) => this.handleSocketClose(event);
-      this.socket.onerror = () => this.handleSocketError();
+      this.socket.onopen = () => {
+        console.log("WebSocket connection successfully established");
+        this.handleSocketOpen();
+      };
+
+      this.socket.onmessage = (event) => {
+        console.log("WebSocket message received", event.data.substring(0, 100) + "...");
+        this.handleSocketMessage(event);
+      };
+
+      this.socket.onclose = (event) => {
+        console.error(`WebSocket connection closed: Code=${event.code}, Reason=${event.reason}, Clean=${event.wasClean}`);
+        this.handleSocketClose(event);
+      };
+
+      this.socket.onerror = (error) => {
+        console.error("WebSocket error occurred:", error);
+        this.handleSocketError();
+      };
     } catch (error) {
+      console.error("Error creating WebSocket connection:", error);
       this.handleSocketError();
     }
   }
@@ -402,5 +422,29 @@ export class SyncService {
 
   private generateClientId(): string {
     return Date.now().toString(36) + Math.random().toString(36).substring(2);
+  }
+
+  private setupPollingFallback(): void {
+    // If WebSocket fails, set up HTTP polling
+    setInterval(() => {
+      // Only poll if WebSocket is disconnected
+      if (this.connectionStatusSource.getValue() === 'disconnected') {
+        this.pollForUpdates();
+      }
+    }, 5000); // Poll every 5 seconds
+  }
+
+  private pollForUpdates(): void {
+    // Simple polling using fetch API
+    fetch(`${environment.baseUrl}/api/poll?roomId=${this.roomId}`)
+      .then(response => response.json())
+      .then(data => {
+        // Process updates from polling
+        this.connectionStatusSource.next('connected');
+        // Handle data...
+      })
+      .catch(error => {
+        console.error("Polling error:", error);
+      });
   }
 }
