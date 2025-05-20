@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { environment } from '../../../environments/environments';
+import { StorageService } from '../storage.service/storage.service';
+import { GameService } from '../game.service/game.service';
 
 interface JiraTicket {
   Key: string;
@@ -40,7 +42,10 @@ export class WebSocketSyncService {
   private userJoined = new BehaviorSubject<any>(null);
   private connectionStatus = new BehaviorSubject<'connected' | 'disconnected' | 'connecting'>('disconnected');
 
-  constructor() {
+  constructor(
+    private storageService: StorageService,
+    private gameService: GameService
+  ) {
     this.clientId = this.generateClientId();
   }
 
@@ -73,15 +78,32 @@ export class WebSocketSyncService {
   }
 
   public connect(roomId: string, displayName: string, isHost: boolean = false): void {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+    if (this.socket &&
+      this.socket.readyState === WebSocket.OPEN &&
+      this.roomId === roomId &&
+      this.displayName === displayName) {
       return;
+    }
+
+    if (this.socket && this.socket.readyState === WebSocket.OPEN && this.roomId !== roomId) {
+      this.disconnect();
     }
 
     this.roomId = roomId;
     this.isHost = isHost;
     this.displayName = displayName;
     this.reconnectAttempts = 0;
+
     this.connectToWebSocket();
+  }
+  public isConnectedToRoom(roomId: string): boolean {
+    return this.socket !== null &&
+      this.socket.readyState === WebSocket.OPEN &&
+      this.roomId === roomId;
+  }
+
+  public getCurrentRoomId(): string | null {
+    return this.roomId;
   }
 
   private connectToWebSocket(): void {
@@ -149,6 +171,8 @@ export class WebSocketSyncService {
         case 'update_issues':
           if (message.data.issues && Array.isArray(message.data.issues)) {
             this.issuesUpdated.next(message.data.issues);
+            // Store the issues in local storage
+            this.storageService.storeTickets(message.data.issues);
           }
           break;
 
@@ -159,6 +183,10 @@ export class WebSocketSyncService {
 
         case 'user_joined':
           this.userJoined.next(message.data);
+          if (this.isHost) {
+            // Send current state to new user
+            setTimeout(() => this.sendFullState(), 1000);
+          }
           break;
 
         case 'request_state':
@@ -175,12 +203,30 @@ export class WebSocketSyncService {
 
         case 'full_state':
           if (!this.isHost && message.data) {
-            if (message.data.issues) {
+            if (message.data.issues && Array.isArray(message.data.issues)) {
               this.issuesUpdated.next(message.data.issues);
+              // Store the issues in local storage
+              this.storageService.storeTickets(message.data.issues);
             }
             if (message.data.selectedTicket) {
               this.ticketSelected.next({ ticket: message.data.selectedTicket });
+              this.storageService.setSelectedTicket(message.data.selectedTicket);
             }
+            if (message.data.gameName) {
+              this.gameService.setGameName(message.data.gameName);
+            }
+            if (message.data.gameType) {
+              this.gameService.setGameType(message.data.gameType);
+            }
+          }
+          break;
+
+        case 'welcome':
+          // Server welcome message
+          if (this.isHost) {
+            setTimeout(() => this.sendFullState(), 1000);
+          } else {
+            this.requestFullStateInternal();
           }
           break;
       }
@@ -226,6 +272,10 @@ export class WebSocketSyncService {
     if (!this.isHost) {
       setTimeout(() => {
         this.requestFullStateInternal();
+      }, 1000);
+    } else if (this.isHost) {
+      setTimeout(() => {
+        this.sendFullState();
       }, 1000);
     }
   }
@@ -276,26 +326,35 @@ export class WebSocketSyncService {
     this.requestFullStateInternal();
   }
 
-  private sendFullState(): void {
-    // This method should be implemented to get data from other services
-    // For now, we'll create an empty implementation that satisfies TypeScript
+  public sendFullState(): void {
+    const issues = this.storageService.getStoredTickets();
+    const selectedTicket = this.storageService.getSelectedTicket();
+    const gameName = this.gameService.getGameName();
+    const gameType = this.gameService.getGameType();
 
-    // In a real implementation, you would get this data from your storage or game services
     const state: RoomState = {
-      issues: [],
-      selectedTicket: null,
-      gameName: '',
-      gameType: ''
+      issues: issues || [],
+      selectedTicket: selectedTicket,
+      gameName: gameName || '',
+      gameType: gameType || ''
     };
 
     this.sendMessage('full_state', state);
-  }
 
+    if (issues && issues.length > 0) {
+      this.sendMessage('update_issues', {
+        issues: issues,
+        forceUpdate: true
+      });
+    }
+  }
   public sendIssuesUpdate(issues: JiraTicket[]): void {
     this.sendMessage('update_issues', {
       issues,
       forceUpdate: true
     });
+
+    this.storageService.storeTickets(issues);
   }
 
   public sendVote(vote: any): void {

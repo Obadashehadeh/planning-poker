@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { environment } from '../../environments/environments';
 import { GameService } from "../services/game.service/game.service";
+import { SessionService } from "../services/session.service/session.service";
 
 @Component({
   selector: 'app-invitation-modal',
@@ -21,7 +22,8 @@ export class InvitationModalComponent implements OnInit {
   copySuccess: boolean = false;
 
   constructor(
-    private gameService: GameService
+    private gameService: GameService,
+    private sessionService: SessionService
   ) {}
 
   ngOnInit(): void {
@@ -93,7 +95,21 @@ export class InvitationModalComponent implements OnInit {
     const gameName = this.gameService.getGameName() || 'planning-poker-game';
     const gameType = this.gameService.getGameType();
 
-    // Create URL with game name and type
-    this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}`;
+    // Get the session ID from the SessionService and ensure it's not empty
+    const sessionId = this.sessionService.getSessionId();
+
+    if (!sessionId) {
+      console.error('No session ID available for invitation link');
+      this.invitationUrl = 'Error: No session ID available. Please try again.';
+      return;
+    }
+
+    console.log(`Creating invitation link with session ID: ${sessionId}`);
+
+    // Create URL with game name, type, and session ID
+    this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}&session=${encodeURIComponent(sessionId)}`;
+
+    // Log the generated URL for debugging
+    console.log(`Generated invitation URL: ${this.invitationUrl}`);
   }
 }

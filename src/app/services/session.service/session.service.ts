@@ -360,33 +360,57 @@ export class SessionService {
         const gameNameParam = params['game'];
         const gameTypeParam = params['type'];
 
-        if (sessionParam && sessionParam !== this.sessionId) {
-          this.sessionId = sessionParam;
-          localStorage.setItem('sessionId', sessionParam);
-          this.isHost = false;
+        if (sessionParam) {
+          // Only update the session ID if it's different from the current one
+          // or if we are not already the host of this session
+          if (sessionParam !== this.sessionId || !this.isHost) {
+            console.log(`Joining session: ${sessionParam}`);
 
-          this.storageService.storeTickets([]);
-          this.storageService.clearSelectedTicket();
+            // Set the session ID
+            this.sessionId = sessionParam;
+            localStorage.setItem('sessionId', sessionParam);
 
-          this.initBroadcastChannel();
-          this.startConnectionCheck();
-          this.startHeartbeat();
+            // Joining an existing session means we're not the host
+            this.isHost = false;
 
-          if (gameNameParam) {
-            this.gameService.setGameName(decodeURIComponent(gameNameParam));
+            // Clear any existing tickets to prepare for receiving new ones
+            this.storageService.storeTickets([]);
+            this.storageService.clearSelectedTicket();
+
+            // Initialize communication channels
+            this.initBroadcastChannel();
+            this.startConnectionCheck();
+            this.startHeartbeat();
+
+            // Set game parameters if provided
+            if (gameNameParam) {
+              this.gameService.setGameName(decodeURIComponent(gameNameParam));
+            }
+
+            if (gameTypeParam) {
+              this.gameService.setGameType(decodeURIComponent(gameTypeParam));
+            }
+
+            // Request the full state from the host
+            this.requestFullStateFromHost();
           }
-
-          if (gameTypeParam) {
-            this.gameService.setGameType(decodeURIComponent(gameTypeParam));
-          }
-
-          this.requestFullStateFromHost();
         }
+
         resolve();
       });
     });
   }
+  public verifySessionId(): void {
+    if (!this.sessionId) {
+      this.sessionId = this.generateUniqueId();
+      localStorage.setItem('sessionId', this.sessionId);
+      this.isHost = true;
 
+      this.initBroadcastChannel();
+      this.startConnectionCheck();
+      this.startHeartbeat();
+    }
+  }
   public forceSyncAllClients(): void {
     this.broadcastEvent('force_sync', {
       timestamp: new Date().getTime(),

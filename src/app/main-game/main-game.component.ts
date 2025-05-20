@@ -75,6 +75,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.debugSessionInfo();
     this.initializeComponent();
   }
 
@@ -97,8 +98,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     try {
       await this.sessionService.checkUrlForSession();
 
+      this.sessionService.verifySessionId();
+
       this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
       this.initializeCardList();
+      const sessionId = this.sessionService.getSessionId();
+      this.isHost = this.sessionService.isSessionHost();
 
       const storedDisplayName = this.storageService.getDisplayName();
       if (storedDisplayName) {
@@ -115,12 +120,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         })
       );
 
-      this.isHost = this.sessionService.isSessionHost();
 
       this.loadSavedTickets();
       this.loadSelectedTicket();
 
       this.subscribeToSessionEvents();
+
       this.setupWebSocketConnection();
 
       if (this.displayName) {
@@ -128,12 +133,49 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }
 
       this.connectionStatus = 'connected';
+
+      setTimeout(() => {
+        if (this.isHost && this.specificData.length > 0) {
+          this.syncIssuesManually();
+        } else {
+          this.requestStateFromAllChannels();
+        }
+      }, 1500);
+
     } catch (error) {
       this.connectionStatus = 'disconnected';
       setTimeout(() => {
         this.initializeComponent();
       }, 2000);
     }
+  }
+  private requestStateFromAllChannels(): void {
+    this.connectionStatus = 'syncing';
+
+    this.sessionService.broadcastEvent('request_state', {
+      timestamp: new Date().getTime(),
+      needsIssues: true,
+      clientId: this.generateClientId()
+    });
+
+    this.localStorageSyncService.requestSync();
+
+    this.sharedWorkerSyncService.requestState();
+
+    if (this.webSocketService.isConnected()) {
+      this.webSocketService.requestFullState();
+    } else {
+      this.setupWebSocketConnection();
+      setTimeout(() => {
+        if (this.webSocketService.isConnected()) {
+          this.webSocketService.requestFullState();
+        }
+      }, 1000);
+    }
+
+    setTimeout(() => {
+      this.connectionStatus = 'connected';
+    }, 1500);
   }
 
   private loadSelectedTicket(): void {
@@ -326,10 +368,28 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       });
 
       this.localStorageSyncService.sendIssuesUpdate(issuesClone);
+
       this.sharedWorkerSyncService.sendIssuesUpdate(issuesClone);
 
       if (this.webSocketService.isConnected()) {
+        const fullState = {
+          issues: issuesClone,
+          selectedTicket: this.selectedTicket,
+          gameName: this.gameService.getGameName(),
+          gameType: this.gameService.getGameType()
+        };
+
+        this.webSocketService.sendFullState();
+
         this.webSocketService.sendIssuesUpdate(issuesClone);
+      } else {
+        this.setupWebSocketConnection();
+
+        setTimeout(() => {
+          if (this.webSocketService.isConnected()) {
+            this.webSocketService.sendIssuesUpdate(issuesClone);
+          }
+        }, 1000);
       }
 
       this.sessionService.forceSyncAllClients();
@@ -359,14 +419,44 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   invitePlayer(): void {
+    // Verify session ID
+    const sessionId = this.sessionService.getSessionId();
+
+    if (!sessionId) {
+      console.error('No session ID available for invitation');
+      alert('Unable to create invitation link: No session ID available. Please refresh the page and try again.');
+      return;
+    }
+
+    console.log(`Creating invitation with session ID: ${sessionId}`);
+
+    // Open invitation modal
     this.invitationService.triggerInvitation();
     this.isOpenInvitationModal = true;
+
+    // Debug session info
+    this.debugSessionInfo();
   }
 
   toggleSidebar(): void {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
+  private handleSessionJoinError(error: any): void {
 
+    this.connectionStatus = 'disconnected';
+
+    this.sessionService.resetSession();
+
+    setTimeout(() => {
+      this.connectionStatus = 'syncing';
+
+      this.setupWebSocketConnection();
+
+      setTimeout(() => {
+        this.connectionStatus = 'connected';
+      }, 1000);
+    }, 1000);
+  }
   setActiveTab(tab: string): void {
     this.activeTab = tab;
   }
@@ -409,6 +499,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       const data = await this.readExcelFile(file);
       await this.processUploadedData(data);
+
+      // After processing, ensure WebSocket connection is established
+      if (!this.webSocketService.isConnected()) {
+        this.setupWebSocketConnection();
+        // Wait for connection to establish
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Broadcast issues to all clients with explicit sync request
+      this.broadcastUpdatedIssues();
+      this.syncIssuesManually();
 
       if (fileButton) {
         fileButton.textContent = 'File Imported!';
@@ -497,8 +598,16 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     }));
 
     this.specificData.sort((a, b) => a.Key.localeCompare(b.Key));
+
     this.saveTickets();
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     this.broadcastUpdatedIssues();
+
+    setTimeout(() => {
+      this.syncIssuesManually();
+    }, 1000);
 
     if (window.innerWidth < 768) {
       setTimeout(() => this.isSidebarOpen = false, 1000);
@@ -782,8 +891,15 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.connectionStatus = 'syncing';
 
     if (this.isHost && this.specificData.length > 0) {
+      // If host, broadcast the issues
       this.broadcastUpdatedIssues();
+
+      // Also send a direct full state via WebSocket
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.sendFullState();
+      }
     } else {
+      // If client, request state from all channels
       this.sessionService.broadcastEvent('request_state', {
         timestamp: new Date().getTime(),
         needsIssues: true,
@@ -793,6 +909,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.localStorageSyncService.requestSync();
       this.sharedWorkerSyncService.requestState();
 
+      // Request state via WebSocket
       if (this.webSocketService.isConnected()) {
         this.webSocketService.requestFullState();
       } else {
@@ -802,9 +919,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.sessionService.forceSyncAllClients();
     }
 
+    // Reset status after a delay
     setTimeout(() => {
       this.connectionStatus = 'connected';
-    }, 1000);
+    }, 1500);
   }
 
 
@@ -835,38 +953,65 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
     if (this.displayNameEntered && this.displayName) {
       const sessionId = this.sessionService.getSessionId() || 'default-room';
+
+      // Connect to WebSocket
       this.webSocketService.connect(sessionId, this.displayName, this.isHost);
+
+      // When connection is established, broadcast full state if host
+      this.subscriptions.push(
+        this.webSocketService.connectionStatus$.subscribe(status => {
+          if (status === 'connected') {
+            this.connectionStatus = 'connected';
+
+            // If host and we have data, broadcast it to everyone
+            if (this.isHost && this.specificData.length > 0) {
+              setTimeout(() => {
+                this.broadcastUpdatedIssues();
+
+                // Force sync to ensure data is shared
+                this.syncIssuesManually();
+              }, 1000);
+            }
+          } else if (status === 'disconnected') {
+            if (this.connectionStatus !== 'disconnected') {
+              this.connectionStatus = 'disconnected';
+              this.socketReconnectTimer = setTimeout(() => {
+                this.setupWebSocketConnection();
+              }, 5000);
+            }
+          }
+        })
+      );
     }
-
+  }
+  private subscribeToWebSocketEvents(): void {
     this.subscriptions.push(
-      this.webSocketService.connectionStatus$.subscribe(status => {
-        if (status === 'connected') {
-          this.connectionStatus = 'connected';
-          if (this.isHost && this.specificData.length > 0) {
-            setTimeout(() => {
-              this.broadcastUpdatedIssues();
-            }, 1000);
-          }
-        } else if (status === 'disconnected') {
-          if (this.connectionStatus !== 'disconnected') {
-            this.connectionStatus = 'disconnected';
-            this.socketReconnectTimer = setTimeout(() => {
-              this.setupWebSocketConnection();
-            }, 5000);
-          }
-        }
-      }),
-
       this.webSocketService.issuesUpdated$.subscribe(issues => {
         if (issues && Array.isArray(issues) && issues.length > 0) {
+          // Update local data
           this.specificData = [...issues];
           this.storageService.storeTickets(this.specificData);
+
+          // Update UI state
+          this.connectionStatus = 'connected';
+
+          // Check if we need to update selected ticket
+          if (!this.selectedTicket && issues.length > 0) {
+            const savedTicket = this.storageService.getSelectedTicket();
+            if (savedTicket) {
+              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
+              if (foundTicket) {
+                this.selectedTicket = foundTicket;
+              }
+            }
+          }
         }
       }),
 
       this.webSocketService.ticketSelected$.subscribe(data => {
         if (data && data.ticket) {
           this.selectedTicket = data.ticket;
+          this.storageService.setSelectedTicket(data.ticket);
           this.cardsPicked = false;
           this.countdownFinished = false;
           this.selectedCard = 0;
@@ -895,7 +1040,80 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           this.selectedCard = 0;
           this.participantVotes = {};
         }
+      }),
+
+      this.webSocketService.userJoined$.subscribe(user => {
+        if (user && this.isHost && this.specificData.length > 0) {
+          setTimeout(() => {
+            this.broadcastUpdatedIssues();
+          }, 800);
+        }
       })
     );
+  }
+  private debugSessionInfo(): void {
+    // Get query parameters from URL
+    const url = new URL(window.location.href);
+    const sessionParam = url.searchParams.get('session');
+    const gameParam = url.searchParams.get('game');
+    const typeParam = url.searchParams.get('type');
+
+    // Get stored session information
+    const storedSessionId = localStorage.getItem('sessionId');
+    const serviceSessionId = this.sessionService.getSessionId();
+
+    // Log all information
+    console.group('Session Debug Information');
+    console.log('URL Parameters:');
+    console.log('- session:', sessionParam);
+    console.log('- game:', gameParam);
+    console.log('- type:', typeParam);
+    console.log('Stored Session ID:', storedSessionId);
+    console.log('Service Session ID:', serviceSessionId);
+    console.log('Is Host:', this.sessionService.isSessionHost());
+    console.log('Connection Status:', this.connectionStatus);
+    console.log('WebSocket Connected:', this.webSocketService.isConnected());
+    console.groupEnd();
+
+    // Check for mismatches
+    if (sessionParam && storedSessionId !== sessionParam) {
+      console.warn('Session ID mismatch between URL and localStorage');
+    }
+
+    if (serviceSessionId !== storedSessionId) {
+      console.warn('Session ID mismatch between service and localStorage');
+    }
+  }
+  private forceUpdateSessionFromUrl(): void {
+    const url = new URL(window.location.href);
+    const sessionParam = url.searchParams.get('session');
+
+    if (sessionParam) {
+      console.log(`Forcing session update to: ${sessionParam}`);
+
+      // Update localStorage
+      localStorage.setItem('sessionId', sessionParam);
+
+      // Force service to update
+      this.sessionService.checkUrlForSession().then(() => {
+        console.log('Session updated from URL');
+
+        // Reconnect WebSocket with new session ID
+        this.setupWebSocketConnection();
+
+        // Request state update
+        setTimeout(() => {
+          this.syncIssuesManually();
+        }, 1000);
+      });
+    } else {
+      console.warn('No session parameter in URL to update from');
+    }
+  }
+  public importIssues(event: any): void {
+    this.onFileChange(event);
+
+    console.log('Issues imported. Current session ID:', this.sessionService.getSessionId());
+    console.log('WebSocket room ID:', this.webSocketService.getCurrentRoomId());
   }
 }

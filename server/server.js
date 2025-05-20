@@ -45,15 +45,13 @@ wss.on('connection', (ws) => {
     removeClientFromRooms(clientId);
   });
 
-  ws.on('error', (error) => {
+  ws.on('error', () => {
     removeClientFromRooms(clientId);
   });
-
-  ws.clientId = clientId;
 });
 
 function handleMessage(ws, clientId, message) {
-  const { type, roomId, data, senderId, senderName, isHost } = message;
+  const { type, roomId, data, isHost } = message;
 
   if (!roomId && type !== 'ping') {
     return;
@@ -61,7 +59,7 @@ function handleMessage(ws, clientId, message) {
 
   switch (type) {
     case 'join_room':
-      joinRoom(ws, roomId, data, clientId, senderName, isHost);
+      joinRoom(ws, roomId, data, clientId, message.senderName, isHost);
       break;
 
     case 'ping':
@@ -69,14 +67,17 @@ function handleMessage(ws, clientId, message) {
       break;
 
     case 'update_issues':
-      const issuesCount = data && data.issues ? data.issues.length : 0;
-      broadcastToRoom(roomId, message, clientId);
-      storeRoomState(roomId, 'issues', data.issues);
+      if (data && data.issues) {
+        storeRoomState(roomId, 'issues', data.issues);
+        broadcastToRoom(roomId, message, clientId);
+      }
       break;
 
     case 'select_ticket':
-      broadcastToRoom(roomId, message, clientId);
-      storeRoomState(roomId, 'selectedTicket', data.ticket);
+      if (data && data.ticket) {
+        storeRoomState(roomId, 'selectedTicket', data.ticket);
+        broadcastToRoom(roomId, message, clientId);
+      }
       break;
 
     case 'vote':
@@ -97,13 +98,19 @@ function handleMessage(ws, clientId, message) {
       break;
 
     case 'full_state':
-      broadcastToRoom(roomId, message, clientId);
       if (data) {
         if (data.issues) storeRoomState(roomId, 'issues', data.issues);
         if (data.selectedTicket) storeRoomState(roomId, 'selectedTicket', data.selectedTicket);
         if (data.gameName) storeRoomState(roomId, 'gameName', data.gameName);
         if (data.gameType) storeRoomState(roomId, 'gameType', data.gameType);
+
+        // Broadcast to all clients to ensure everyone has the latest state
+        broadcastToRoom(roomId, message, clientId);
       }
+      break;
+
+    case 'user_joined':
+      broadcastToRoom(roomId, message, clientId);
       break;
 
     default:
@@ -170,8 +177,11 @@ function joinRoom(ws, roomId, data, clientId, senderName, isHost) {
     timestamp: Date.now()
   }));
 
-  if (data.needsFullState || !clientInfo.isHost) {
-    sendRoomStateToClient(roomId, ws);
+  // Always send the current room state to the joining client
+  sendRoomStateToClient(roomId, ws);
+
+  // If not host, also notify the host to send their state
+  if (!clientInfo.isHost) {
     notifyHostForState(roomId, clientId);
   }
 }
@@ -212,13 +222,11 @@ function broadcastToRoom(roomId, message, excludeClientId = null) {
   }
 
   const room = rooms.get(roomId);
-  let messageCount = 0;
 
   room.clients.forEach((client, id) => {
     if (id !== excludeClientId) {
       try {
         client.ws.send(JSON.stringify(message));
-        messageCount++;
       } catch (error) {
         room.clients.delete(id);
       }
@@ -237,7 +245,6 @@ function notifyHostForState(roomId, clientId) {
   room.clients.forEach((client, id) => {
     if (client.isHost) {
       hostClient = client;
-      return;
     }
   });
 
@@ -376,5 +383,5 @@ wss.on('connection', (ws) => {
 });
 
 server.listen(port, () => {
-  // Server started
+  console.log(`WebSocket server is running on port ${port}`);
 });
