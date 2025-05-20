@@ -1,9 +1,8 @@
 import { Component, Input, Output, EventEmitter, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { SessionService } from '../services/session.service';
 import { environment } from '../../environments/environments';
-import {GameService} from "../services/game.service/game.service";
+import { GameService } from "../services/game.service/game.service";
 
 @Component({
   selector: 'app-invitation-modal',
@@ -22,8 +21,7 @@ export class InvitationModalComponent implements OnInit {
   copySuccess: boolean = false;
 
   constructor(
-    private gameService: GameService,
-    private sessionService: SessionService
+    private gameService: GameService
   ) {}
 
   ngOnInit(): void {
@@ -94,8 +92,7 @@ export class InvitationModalComponent implements OnInit {
     const baseUrl = environment.baseUrl;
     const gameName = this.gameService.getGameName() || 'planning-poker-game';
     const gameType = this.gameService.getGameType();
-    const sessionId = this.sessionService.getSessionId();
 
-    this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}&session=${sessionId}`;
+    this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}`;
   }
 }

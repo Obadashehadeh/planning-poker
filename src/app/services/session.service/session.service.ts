@@ -1,8 +1,8 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
-import { StorageService } from './storage.service/storage.service';
-import { GameService } from "./game.service/game.service";
+import { StorageService } from '../storage.service/storage.service';
+import { GameService } from "../game.service/game.service";
 
 @Injectable({
   providedIn: 'root'
