@@ -105,7 +105,6 @@ export class LocalStorageSyncService {
     });
 
     this.connectionStatus.next('connected');
-    console.log(`LocalStorageSyncService initialized for client: ${this.clientId}`);
   }
 
   private registerClient(): void {
@@ -130,7 +129,6 @@ export class LocalStorageSyncService {
     );
 
     if (activeClients.length === 0) {
-      // No active clients, become host
       this.becomeHost();
       return;
     }

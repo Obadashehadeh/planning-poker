@@ -12,16 +12,10 @@ export class SessionService {
   private isHost = true;
   private broadcastChannel: BroadcastChannel | null = null;
   private lastSyncTimestamp = 0;
-  private syncRetryCount = 0;
-  private maxSyncRetries = 15;
   private connectionCheckInterval: any = null;
-  private isInitialized = false;
   private clientId: string;
-  private syncTimeouts: any[] = [];
-  private maxSyncTimeouts = 20;
-  private lastHeartbeat = 0;
   private heartbeatInterval: any = null;
-  private hostDetectionTimeout: any = null;
+  private lastHeartbeat = 0;
 
   private ticketSelected = new BehaviorSubject<any>(null);
   private voteReceived = new BehaviorSubject<any>(null);
@@ -86,44 +80,16 @@ export class SessionService {
         this.handleBroadcastMessage(event.data);
       };
 
-      this.broadcastChannel.onmessageerror = (error) => {
+      this.broadcastChannel.onmessageerror = () => {
         setTimeout(() => {
           this.initBroadcastChannel();
         }, 1000);
       };
 
-      if (!this.isHost && !this.isInitialized) {
-        this.detectHostAndSync();
-        this.isInitialized = true;
+      if (!this.isHost) {
+        this.requestFullStateFromHost();
       }
     }
-  }
-
-  private detectHostAndSync(): void {
-    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-    this.syncTimeouts = [];
-
-    this.broadcastEvent('client_joined', {
-      clientId: this.clientId,
-      timestamp: new Date().getTime(),
-      needsFullSync: true
-    });
-
-    const syncAttempts = [
-      100, 300, 600, 1000, 1500, 2000, 3000, 4000, 5000,
-      7000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 60000
-    ];
-
-    syncAttempts.forEach((delay, index) => {
-      const timeout = setTimeout(() => {
-        this.requestFullStateFromHost();
-      }, delay);
-      this.syncTimeouts.push(timeout);
-    });
-
-    this.hostDetectionTimeout = setTimeout(() => {
-      this.clearSyncTimeouts();
-    }, 10000);
   }
 
   private requestFullStateFromHost(): void {
@@ -133,8 +99,7 @@ export class SessionService {
       clientId: this.clientId,
       timestamp: new Date().getTime(),
       currentIssuesCount: currentIssues.length,
-      hasIssues: currentIssues.length > 0,
-      urgent: true
+      hasIssues: currentIssues.length > 0
     });
 
     this.broadcastEvent('ping', {
@@ -220,37 +185,11 @@ export class SessionService {
             if (this.broadcastChannel) {
               this.broadcastChannel.postMessage(message);
             }
-          }, 100);
-
-          setTimeout(() => {
-            if (this.broadcastChannel) {
-              this.broadcastChannel.postMessage(message);
-            }
           }, 500);
-
-          if (eventType === 'full_state' && this.isHost) {
-            setTimeout(() => {
-              if (this.broadcastChannel) {
-                this.broadcastChannel.postMessage(message);
-              }
-            }, 1000);
-
-            setTimeout(() => {
-              if (this.broadcastChannel) {
-                this.broadcastChannel.postMessage(message);
-              }
-            }, 2000);
-          }
         }
-      } catch (error: unknown) {
+      } catch (error) {
         setTimeout(() => {
-          if (this.broadcastChannel) {
-            try {
-              this.broadcastChannel.postMessage(message);
-            } catch (retryError: unknown) {
-              this.initBroadcastChannel();
-            }
-          }
+          this.initBroadcastChannel();
         }, 1000);
       }
     }
@@ -269,9 +208,6 @@ export class SessionService {
       case 'client_joined':
         if (this.isHost) {
           setTimeout(() => this.sendCurrentState(), 100);
-          setTimeout(() => this.sendCurrentState(), 500);
-          setTimeout(() => this.sendCurrentState(), 1000);
-          setTimeout(() => this.sendCurrentState(), 2000);
         }
         break;
 
@@ -319,55 +255,29 @@ export class SessionService {
       case 'ping':
         if (this.isHost) {
           this.sendCurrentState();
-          setTimeout(() => this.sendCurrentState(), 100);
-          setTimeout(() => this.sendCurrentState(), 500);
-          setTimeout(() => this.sendCurrentState(), 1000);
         }
         break;
 
       case 'full_state':
         if (!this.isHost) {
           this.handleFullState(message.data);
-          this.clearSyncTimeouts();
         }
         break;
 
       case 'force_sync':
         if (this.isHost) {
-          setTimeout(() => this.sendCurrentState(), 100);
+          this.sendCurrentState();
         } else {
-          setTimeout(() => this.requestFullStateFromHost(), 100);
+          this.requestFullStateFromHost();
         }
         break;
 
       case 'user_joined':
         this.userJoined.next(message.data);
         if (this.isHost) {
-          setTimeout(() => this.sendCurrentState(), 100);
           setTimeout(() => this.sendCurrentState(), 500);
-          setTimeout(() => this.sendCurrentState(), 1500);
-          setTimeout(() => this.sendCurrentState(), 3000);
         }
         break;
-
-      case 'pong':
-        if (!this.isHost && message.data.hasIssues) {
-          const currentIssues = this.storageService.getStoredTickets();
-          if (currentIssues.length === 0) {
-            this.requestFullStateFromHost();
-          }
-        }
-        break;
-    }
-  }
-
-  private clearSyncTimeouts(): void {
-    this.syncTimeouts.forEach(timeout => clearTimeout(timeout));
-    this.syncTimeouts = [];
-
-    if (this.hostDetectionTimeout) {
-      clearTimeout(this.hostDetectionTimeout);
-      this.hostDetectionTimeout = null;
     }
   }
 
@@ -386,7 +296,6 @@ export class SessionService {
         this.lastSyncTimestamp = data.timestamp || new Date().getTime();
         this.storageService.storeTickets(data.issues);
         this.issuesUpdated.next([...data.issues]);
-        this.clearSyncTimeouts();
       }
     }
   }
@@ -402,7 +311,6 @@ export class SessionService {
       selectedTicket: selectedTicket,
       timestamp: new Date().getTime(),
       forceUpdate: true,
-      sender: 'host_state_broadcast',
       sessionId: this.sessionId
     };
 
@@ -412,8 +320,7 @@ export class SessionService {
       this.broadcastEvent('update_issues', {
         issues: issues,
         timestamp: new Date().getTime(),
-        forceUpdate: true,
-        sender: 'host_issues_broadcast'
+        forceUpdate: true
       });
     }
   }
@@ -431,15 +338,10 @@ export class SessionService {
       this.gameService.setGameType(state.gameType);
     }
 
-    const currentIssues = this.storageService.getStoredTickets();
-
     if (state.issues && Array.isArray(state.issues) && state.issues.length > 0) {
       this.lastSyncTimestamp = state.timestamp || new Date().getTime();
       this.storageService.storeTickets(state.issues);
       this.issuesUpdated.next([...state.issues]);
-
-      setTimeout(() => this.issuesUpdated.next([...state.issues]), 100);
-      setTimeout(() => this.issuesUpdated.next([...state.issues]), 500);
     }
 
     if (state.selectedTicket) {
@@ -462,7 +364,6 @@ export class SessionService {
           this.sessionId = sessionParam;
           localStorage.setItem('sessionId', sessionParam);
           this.isHost = false;
-          this.isInitialized = false;
 
           this.storageService.storeTickets([]);
           this.storageService.clearSelectedTicket();
@@ -479,28 +380,11 @@ export class SessionService {
             this.gameService.setGameType(decodeURIComponent(gameTypeParam));
           }
 
-          this.requestStateWithAggressiveRetry();
+          this.requestFullStateFromHost();
         }
         resolve();
       });
     });
-  }
-
-  private requestStateWithAggressiveRetry(): void {
-    this.syncRetryCount = 0;
-    this.requestStateWithBackoff();
-  }
-
-  private requestStateWithBackoff(): void {
-    this.requestFullStateFromHost();
-
-    if (this.syncRetryCount < this.maxSyncRetries) {
-      const delay = Math.min(1000 * Math.pow(1.3, this.syncRetryCount), 8000);
-      setTimeout(() => {
-        this.syncRetryCount++;
-        this.requestStateWithBackoff();
-      }, delay);
-    }
   }
 
   public forceSyncAllClients(): void {
@@ -510,10 +394,7 @@ export class SessionService {
     });
 
     if (this.isHost) {
-      setTimeout(() => this.sendCurrentState(), 100);
       setTimeout(() => this.sendCurrentState(), 500);
-      setTimeout(() => this.sendCurrentState(), 1500);
-      setTimeout(() => this.sendCurrentState(), 3000);
     }
   }
 
@@ -541,8 +422,6 @@ export class SessionService {
   }
 
   public resetSession(): void {
-    this.clearSyncTimeouts();
-
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
     }
@@ -561,7 +440,6 @@ export class SessionService {
     this.sessionId = this.generateUniqueId();
     localStorage.setItem('sessionId', this.sessionId);
     this.isHost = true;
-    this.isInitialized = false;
     this.clientId = this.generateClientId();
 
     this.initBroadcastChannel();
@@ -570,8 +448,6 @@ export class SessionService {
   }
 
   ngOnDestroy(): void {
-    this.clearSyncTimeouts();
-
     if (this.broadcastChannel) {
       this.broadcastChannel.close();
     }

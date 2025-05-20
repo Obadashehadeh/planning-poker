@@ -17,22 +17,20 @@ export class StorageService {
   private selectedCardsKey = 'selectedCards';
   private ticketsKey = 'jiraTickets';
   private selectedTicketKey = 'selectedTicket';
-  private syncVersionKey = 'syncVersion';
-  private lastUpdateKey = 'lastTicketUpdate';
 
   setDisplayName(displayName: string): void {
     try {
       localStorage.setItem(this.displayNameKey, displayName);
-    } catch (error: unknown) {
-      this.handleStorageError('setDisplayName', error);
+    } catch (error) {
+      console.error('Error storing display name', error);
     }
   }
 
   getDisplayName(): string | null {
     try {
       return localStorage.getItem(this.displayNameKey);
-    } catch (error: unknown) {
-      this.handleStorageError('getDisplayName', error);
+    } catch (error) {
+      console.error('Error getting display name', error);
       return null;
     }
   }
@@ -40,8 +38,8 @@ export class StorageService {
   clearDisplayName(): void {
     try {
       localStorage.removeItem(this.displayNameKey);
-    } catch (error: unknown) {
-      this.handleStorageError('clearDisplayName', error);
+    } catch (error) {
+      console.error('Error clearing display name', error);
     }
   }
 
@@ -50,16 +48,16 @@ export class StorageService {
       const selectedCards: number[] = JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
       selectedCards.push(card);
       localStorage.setItem(this.selectedCardsKey, JSON.stringify(selectedCards));
-    } catch (error: unknown) {
-      this.handleStorageError('storeLastClickedCard', error);
+    } catch (error) {
+      console.error('Error storing last clicked card', error);
     }
   }
 
   getStoredCards(): number[] {
     try {
       return JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
-    } catch (error: unknown) {
-      this.handleStorageError('getStoredCards', error);
+    } catch (error) {
+      console.error('Error getting stored cards', error);
       return [];
     }
   }
@@ -67,8 +65,8 @@ export class StorageService {
   clearStoredCards(): void {
     try {
       localStorage.removeItem(this.selectedCardsKey);
-    } catch (error: unknown) {
-      this.handleStorageError('clearStoredCards', error);
+    } catch (error) {
+      console.error('Error clearing stored cards', error);
     }
   }
 
@@ -88,32 +86,14 @@ export class StorageService {
       }));
 
       localStorage.setItem(this.ticketsKey, JSON.stringify(ticketsToStore));
-      localStorage.setItem(this.lastUpdateKey, new Date().getTime().toString());
-      this.updateSyncVersion();
-
-      const verifyStored = this.getStoredTickets();
-      if (verifyStored.length !== ticketsToStore.length) {
-        this.forceStoreTickets(ticketsToStore);
-      }
-    } catch (error: unknown) {
-      this.handleStorageError('storeTickets', error);
+    } catch (error) {
+      console.error('Error storing tickets', error);
       try {
         localStorage.removeItem(this.ticketsKey);
         localStorage.setItem(this.ticketsKey, JSON.stringify([]));
-      } catch (fallbackError: unknown) {
-        this.handleStorageError('storeTickets fallback', fallbackError);
+      } catch (fallbackError) {
+        console.error('Error in fallback storage', fallbackError);
       }
-    }
-  }
-
-  private forceStoreTickets(tickets: JiraTicket[]): void {
-    try {
-      localStorage.removeItem(this.ticketsKey);
-      setTimeout(() => {
-        localStorage.setItem(this.ticketsKey, JSON.stringify(tickets));
-      }, 100);
-    } catch (error: unknown) {
-      this.handleStorageError('forceStoreTickets', error);
     }
   }
 
@@ -131,8 +111,8 @@ export class StorageService {
       }
 
       return parsed;
-    } catch (error: unknown) {
-      this.handleStorageError('getStoredTickets', error);
+    } catch (error) {
+      console.error('Error getting stored tickets', error);
       localStorage.removeItem(this.ticketsKey);
       return [];
     }
@@ -147,8 +127,8 @@ export class StorageService {
         tickets[ticketIndex]['Story point'] = storyPoints;
         this.storeTickets(tickets);
       }
-    } catch (error: unknown) {
-      this.handleStorageError('updateTicketStoryPoints', error);
+    } catch (error) {
+      console.error('Error updating ticket story points', error);
     }
   }
 
@@ -158,8 +138,8 @@ export class StorageService {
         return;
       }
       localStorage.setItem(this.selectedTicketKey, JSON.stringify(ticket));
-    } catch (error: unknown) {
-      this.handleStorageError('setSelectedTicket', error);
+    } catch (error) {
+      console.error('Error setting selected ticket', error);
       localStorage.removeItem(this.selectedTicketKey);
     }
   }
@@ -171,8 +151,8 @@ export class StorageService {
         return null;
       }
       return JSON.parse(ticket);
-    } catch (error: unknown) {
-      this.handleStorageError('getSelectedTicket', error);
+    } catch (error) {
+      console.error('Error getting selected ticket', error);
       localStorage.removeItem(this.selectedTicketKey);
       return null;
     }
@@ -181,112 +161,8 @@ export class StorageService {
   clearSelectedTicket(): void {
     try {
       localStorage.removeItem(this.selectedTicketKey);
-    } catch (error: unknown) {
-      this.handleStorageError('clearSelectedTicket', error);
+    } catch (error) {
+      console.error('Error clearing selected ticket', error);
     }
-  }
-
-  private updateSyncVersion(): void {
-    try {
-      const currentVersion = parseInt(localStorage.getItem(this.syncVersionKey) || '0');
-      const newVersion = currentVersion + 1;
-      localStorage.setItem(this.syncVersionKey, newVersion.toString());
-    } catch (error: unknown) {
-      this.handleStorageError('updateSyncVersion', error);
-    }
-  }
-
-  getSyncVersion(): number {
-    try {
-      return parseInt(localStorage.getItem(this.syncVersionKey) || '0');
-    } catch (error: unknown) {
-      this.handleStorageError('getSyncVersion', error);
-      return 0;
-    }
-  }
-
-  getLastUpdateTimestamp(): number {
-    try {
-      return parseInt(localStorage.getItem(this.lastUpdateKey) || '0');
-    } catch (error: unknown) {
-      this.handleStorageError('getLastUpdateTimestamp', error);
-      return 0;
-    }
-  }
-
-  clearStoredData(): void {
-    try {
-      const keys = [
-        this.displayNameKey,
-        this.selectedCardsKey,
-        this.ticketsKey,
-        this.selectedTicketKey,
-        this.syncVersionKey,
-        this.lastUpdateKey
-      ];
-
-      keys.forEach(key => {
-        try {
-          localStorage.removeItem(key);
-        } catch (keyError: unknown) {
-          this.handleStorageError(`clearStoredData-${key}`, keyError);
-        }
-      });
-    } catch (error: unknown) {
-      this.handleStorageError('clearStoredData', error);
-    }
-  }
-
-  forceRefreshTickets(): void {
-    try {
-      const tickets = this.getStoredTickets();
-      this.storeTickets([]);
-      setTimeout(() => {
-        this.storeTickets(tickets);
-      }, 100);
-    } catch (error: unknown) {
-      this.handleStorageError('forceRefreshTickets', error);
-    }
-  }
-
-  debugStorageHealth(): object | null {
-    try {
-      const tickets = this.getStoredTickets();
-      const selectedTicket = this.getSelectedTicket();
-      const displayName = this.getDisplayName();
-      const syncVersion = this.getSyncVersion();
-      const lastUpdate = this.getLastUpdateTimestamp();
-
-      return {
-        ticketsCount: tickets.length,
-        selectedTicket: selectedTicket?.Key || 'None',
-        displayName: displayName || 'None',
-        syncVersion: syncVersion,
-        lastUpdate: new Date(lastUpdate).toISOString(),
-        storageSize: JSON.stringify(localStorage).length
-      };
-    } catch (error: unknown) {
-      this.handleStorageError('debugStorageHealth', error);
-      return null;
-    }
-  }
-
-  exportDebugData(): object {
-    try {
-      return {
-        tickets: this.getStoredTickets(),
-        selectedTicket: this.getSelectedTicket(),
-        displayName: this.getDisplayName(),
-        syncVersion: this.getSyncVersion(),
-        lastUpdate: this.getLastUpdateTimestamp(),
-        timestamp: new Date().toISOString()
-      };
-    } catch (error: unknown) {
-      this.handleStorageError('exportDebugData', error);
-      return { error: 'Export failed' };
-    }
-  }
-
-  private handleStorageError(method: string, error: unknown): void {
   }
 }

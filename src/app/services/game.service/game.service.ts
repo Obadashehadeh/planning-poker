@@ -21,9 +21,9 @@ export class GameService {
     const storedGameType = localStorage.getItem(this.gameTypeKey);
 
     this.gameNameSubject.next(storedGameName);
-
     this.gameType = storedGameType || '';
   }
+
   setGameName(name: string): void {
     localStorage.setItem(this.gameNameKey, name);
     this.gameNameSubject.next(name);
@@ -32,9 +32,9 @@ export class GameService {
   getGameName(): string | null {
     return this.gameNameSubject.getValue();
   }
+
   setGameType(gameType: string): void {
     localStorage.setItem(this.gameTypeKey, gameType);
-
     this.gameType = gameType;
   }
 
@@ -45,14 +45,12 @@ export class GameService {
         this.gameType = storedGameType;
       }
     }
-
     return this.gameType;
   }
 
   clearGameData(): void {
     localStorage.removeItem(this.gameNameKey);
     localStorage.removeItem(this.gameTypeKey);
-
     this.gameType = '';
     this.gameNameSubject.next(null);
   }

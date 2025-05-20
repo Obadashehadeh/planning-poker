@@ -3,7 +3,6 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import * as XLSX from 'xlsx';
-import { LocalStorageSyncService } from '../services/storage.service/localstorage-sync.service';
 import { StorageService } from '../services/storage.service/storage.service';
 import { InvitationService } from '../services/invitation.service/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
@@ -11,6 +10,8 @@ import { SessionService } from '../services/session.service/session.service';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { GameService } from "../services/game.service/game.service";
+import { LocalStorageSyncService } from "../services/storage.service/localstorage-sync.service";
+import { SharedWorkerSyncService } from "../services/session.service/sharedworker-sync.service";
 
 interface JiraTicket {
   Key: string;
@@ -39,28 +40,19 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   countdownInProgress: boolean = false;
   countdownFinished: boolean = false;
   average: number = 0;
-  selectedCards: number[] = [];
-  showModal: boolean = false;
   isSidebarOpen: boolean = false;
   specificData: JiraTicket[] = [];
-  uploadedData: any[] = [];
-  expectedColumns: string[] = ["Key", "Summary", "Status", "Assignee", "Story point","Description"];
   displayNameEntered: boolean = false;
   displayName: string = '';
-  register: boolean = true;
   overlay: boolean = true;
   isDropdownOpen: boolean = false;
-  isModalVisible: boolean = false;
   isOpenInvitationModal = false;
   selectedTicket: JiraTicket | null = null;
   fileUploadError: string = '';
   activeTab: string = 'unvoted';
   isHost: boolean = true;
-  syncInProgress: boolean = false;
   connectionStatus: 'connected' | 'disconnected' | 'syncing' = 'connected';
   private subscriptions: Subscription[] = [];
-  private syncInterval: any;
-  private initialSyncCompleted: boolean = false;
   public participantVotes: { [key: string]: number } = {};
   public Object = Object;
 
@@ -69,11 +61,13 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     private storageService: StorageService,
     private invitationService: InvitationService,
     private sessionService: SessionService,
+    private localStorageSyncService: LocalStorageSyncService,
+    private sharedWorkerSyncService: SharedWorkerSyncService,
     private route: ActivatedRoute,
     private router: Router
   ) {
     this.invitationService.getInvitationStatus().subscribe((status) => {
-      this.showModal = status;
+      this.isOpenInvitationModal = status;
     });
   }
 
@@ -88,7 +82,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.cleanup();
+    this.subscriptions.forEach(sub => sub.unsubscribe());
   }
 
   private async initializeComponent(): Promise<void> {
@@ -101,7 +95,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       const storedDisplayName = this.storageService.getDisplayName();
       if (storedDisplayName) {
         this.displayNameEntered = true;
-        this.register = false;
         this.overlay = false;
         this.displayName = storedDisplayName;
       }
@@ -116,17 +109,8 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       this.isHost = this.sessionService.isSessionHost();
 
-      if (this.isHost) {
-        this.loadSavedTickets();
-        this.loadSelectedTicket();
-      } else {
-        this.loadSavedTickets();
-        this.loadSelectedTicket();
-
-        if (this.specificData.length === 0) {
-          await this.waitForInitialSync();
-        }
-      }
+      this.loadSavedTickets();
+      this.loadSelectedTicket();
 
       this.subscribeToSessionEvents();
 
@@ -135,62 +119,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }
 
       this.connectionStatus = 'connected';
-    } catch (error: unknown) {
+    } catch (error) {
       this.connectionStatus = 'disconnected';
-      this.retryInitialization();
-    }
-  }
-  private async waitForInitialSync(): Promise<void> {
-    return new Promise((resolve) => {
-      const maxWaitTime = 15000;
-      const checkInterval = 1000;
-      let elapsedTime = 0;
-
-      const interval = setInterval(() => {
-        const currentTickets = this.storageService.getStoredTickets();
-        elapsedTime += checkInterval;
-
-        if (currentTickets.length > 0) {
-          this.specificData = [...currentTickets];
-          clearInterval(interval);
-          resolve();
-        } else if (elapsedTime >= maxWaitTime) {
-          clearInterval(interval);
-          resolve();
-        }
-      }, checkInterval);
-    });
-  }
-
-  private retryInitialization(): void {
-    setTimeout(() => {
-      this.initializeComponent();
-    }, 2000);
-  }
-
-  private startPeriodicSync(): void {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-    }
-
-    this.syncInterval = setInterval(() => {
-      const currentIssues = this.storageService.getStoredTickets();
-      if (!this.initialSyncCompleted || currentIssues.length === 0) {
-        this.sessionService.forceSyncAllClients();
-      }
-    }, 2000);
-  }
-
-  private requestInitialSync(): void {
-    const attempts = [100, 500, 1000, 2000, 3000, 5000, 8000, 12000, 15000, 20000];
-
-    attempts.forEach((delay, index) => {
       setTimeout(() => {
-        if (!this.initialSyncCompleted || this.storageService.getStoredTickets().length === 0) {
-          this.sessionService.forceSyncAllClients();
-        }
-      }, delay);
-    });
+        this.initializeComponent();
+      }, 2000);
+    }
   }
 
   private loadSelectedTicket(): void {
@@ -200,46 +134,27 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     }
   }
 
-  private cleanup(): void {
-    this.subscriptions.forEach(sub => sub.unsubscribe());
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-    }
-  }
-
   submitDisplayName(): void {
     if (this.displayName.trim() !== '') {
       this.displayNameEntered = true;
-      this.register = false;
       this.overlay = false;
       this.storageService.setDisplayName(this.displayName);
-      this.sessionService.broadcastEvent('user_joined', {
+
+      const userData = {
         user: this.displayName,
         timestamp: new Date().getTime(),
-        needsSync: !this.isHost,
         clientId: this.generateClientId(),
         isHost: this.isHost
-      });
+      };
+
+      this.sessionService.broadcastEvent('user_joined', userData);
+      this.localStorageSyncService.sendUserJoined(userData);
+      this.sharedWorkerSyncService.sendUserJoined(userData);
 
       if (!this.isHost) {
         setTimeout(() => {
           this.sessionService.forceSyncAllClients();
         }, 500);
-
-        setTimeout(() => {
-          this.sessionService.forceSyncAllClients();
-        }, 2000);
-
-        setTimeout(() => {
-          this.sessionService.forceSyncAllClients();
-        }, 5000);
-
-        setTimeout(() => {
-          const currentTickets = this.storageService.getStoredTickets();
-          if (currentTickets.length > 0) {
-            this.specificData = [...currentTickets];
-          }
-        }, 3000);
       }
     }
   }
@@ -258,7 +173,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.isDropdownOpen = !this.isDropdownOpen;
   }
 
-  @HostListener('document:click', ['$event'])
+  @HostListener('document:click')
   onClick(): void {
     this.isDropdownOpen = false;
   }
@@ -270,10 +185,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.cardsPicked = true;
 
     this.storageService.storeLastClickedCard(card);
+
     this.sessionService.broadcastEvent('vote', {
       card: card,
       user: this.displayName,
       timestamp: new Date().getTime()
+    });
+
+    this.localStorageSyncService.sendVote({
+      card: card,
+      user: this.displayName
+    });
+
+    this.sharedWorkerSyncService.sendVote({
+      card: card,
+      user: this.displayName
     });
   }
 
@@ -291,6 +217,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       ticketKey: this.selectedTicket.Key,
       timestamp: new Date().getTime()
     });
+
+    this.localStorageSyncService.sendReveal();
+    this.sharedWorkerSyncService.sendReveal();
 
     this.updateCountdown();
   }
@@ -324,6 +253,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         timestamp: new Date().getTime()
       });
 
+      this.localStorageSyncService.sendResetVoting();
+      this.sharedWorkerSyncService.sendResetVoting();
+
       this.updateTicketEstimate(this.selectedTicket, this.average);
       this.saveTickets();
       this.broadcastUpdatedIssues();
@@ -331,6 +263,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.sessionService.broadcastEvent('reset_voting', {
         timestamp: new Date().getTime()
       });
+
+      this.localStorageSyncService.sendResetVoting();
+      this.sharedWorkerSyncService.sendResetVoting();
     }
   }
 
@@ -338,11 +273,11 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     if (this.specificData.length > 0) {
       const timestamp = new Date().getTime();
       const issuesClone = this.specificData.map(issue => ({ ...issue }));
+
       this.sessionService.broadcastEvent('update_issues', {
         issues: issuesClone,
         timestamp: timestamp,
-        forceUpdate: true,
-        source: 'broadcast_updated'
+        forceUpdate: true
       });
 
       this.sessionService.broadcastEvent('full_state', {
@@ -351,30 +286,11 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         issues: issuesClone,
         selectedTicket: this.selectedTicket,
         timestamp: timestamp,
-        forceUpdate: true,
-        source: 'broadcast_updated_full'
+        forceUpdate: true
       });
 
-      setTimeout(() => {
-        this.sessionService.broadcastEvent('update_issues', {
-          issues: issuesClone,
-          timestamp: timestamp,
-          forceUpdate: true,
-          source: 'broadcast_updated_retry1'
-        });
-      }, 500);
-
-      setTimeout(() => {
-        this.sessionService.broadcastEvent('full_state', {
-          gameName: this.gameService.getGameName(),
-          gameType: this.gameService.getGameType(),
-          issues: issuesClone,
-          selectedTicket: this.selectedTicket,
-          timestamp: timestamp,
-          forceUpdate: true,
-          source: 'broadcast_updated_retry2'
-        });
-      }, 1500);
+      this.localStorageSyncService.sendIssuesUpdate(issuesClone);
+      this.sharedWorkerSyncService.sendIssuesUpdate(issuesClone);
 
       this.sessionService.forceSyncAllClients();
     }
@@ -462,7 +378,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }
 
       event.target.value = '';
-    } catch (error: unknown) {
+    } catch (error) {
       this.fileUploadError = 'Error processing Excel file. Please check the file format.';
       if (fileButton) {
         fileButton.textContent = originalText;
@@ -498,7 +414,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           }
 
           resolve(data);
-        } catch (error: unknown) {
+        } catch (error) {
           reject(error);
         }
       };
@@ -542,59 +458,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
     this.specificData.sort((a, b) => a.Key.localeCompare(b.Key));
     this.saveTickets();
-    await this.broadcastIssuesWithRetry();
+    this.broadcastUpdatedIssues();
 
     if (window.innerWidth < 768) {
       setTimeout(() => this.isSidebarOpen = false, 1000);
-    }
-  }
-
-  private async broadcastIssuesWithRetry(retryCount: number = 0): Promise<void> {
-    const maxRetries = 15;
-    const baseDelay = 300;
-
-    if (this.specificData.length > 0) {
-      const timestamp = new Date().getTime();
-      const issuesClone = this.specificData.map(issue => ({ ...issue }));
-      this.sessionService.broadcastEvent('update_issues', {
-        issues: issuesClone,
-        timestamp: timestamp,
-        forceUpdate: true,
-        source: 'file_upload',
-        retryCount: retryCount
-      });
-
-      this.sessionService.broadcastEvent('full_state', {
-        gameName: this.gameService.getGameName(),
-        gameType: this.gameService.getGameType(),
-        issues: issuesClone,
-        selectedTicket: this.selectedTicket,
-        timestamp: timestamp,
-        forceUpdate: true,
-        source: 'file_upload_full_state'
-      });
-
-      this.sessionService.forceSyncAllClients();
-
-      setTimeout(() => {
-        this.sessionService.broadcastEvent('update_issues', {
-          issues: issuesClone,
-          timestamp: timestamp,
-          forceUpdate: true,
-          source: 'file_upload_delayed',
-          retryCount: retryCount
-        });
-      }, 1000);
-
-      setTimeout(() => {
-        this.sessionService.forceSyncAllClients();
-      }, 2000);
-
-      if (retryCount < maxRetries) {
-        setTimeout(() => {
-          this.broadcastIssuesWithRetry(retryCount + 1);
-        }, baseDelay * (retryCount + 1));
-      }
     }
   }
 
@@ -634,6 +501,9 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       timestamp: new Date().getTime()
     });
 
+    this.localStorageSyncService.sendTicketSelection(this.selectedTicket);
+    this.sharedWorkerSyncService.sendTicketSelection(this.selectedTicket);
+
     if (window.innerWidth < 768) {
       this.isSidebarOpen = false;
     }
@@ -666,7 +536,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       const filename = `planning_poker_estimates_${new Date().toISOString().slice(0, 10)}.csv`;
       XLSX.writeFile(workbook, filename);
-    } catch (error: unknown) {
+    } catch (error) {
       alert('Error exporting file. Please try again.');
     }
   }
@@ -676,7 +546,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   logout(): void {
-    this.cleanup();
+    this.subscriptions.forEach(sub => sub.unsubscribe());
     this.storageService.clearDisplayName();
     this.sessionService.resetSession();
     this.router.navigate(['/create-game']);
@@ -702,7 +572,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.subscriptions.push(
       this.sessionService.issuesUpdated$.subscribe(issues => {
         if (issues && Array.isArray(issues) && issues.length > 0) {
-          const currentCount = this.specificData.length;
           this.specificData = [...issues];
           this.storageService.storeTickets(this.specificData);
           this.connectionStatus = 'connected';
@@ -716,9 +585,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
             }
           }
         }
-      })
-    );
-    this.subscriptions.push(
+      }),
       this.sessionService.ticketSelected$.subscribe(data => {
         if (data && data.ticket) {
           this.selectedTicket = data.ticket;
@@ -727,26 +594,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           this.selectedCard = 0;
           this.participantVotes = {};
         }
-      })
-    );
-
-    this.subscriptions.push(
+      }),
       this.sessionService.voteReceived$.subscribe(data => {
         if (data && data.user && data.card !== undefined) {
           this.participantVotes[data.user] = data.card;
         }
-      })
-    );
-
-    this.subscriptions.push(
+      }),
       this.sessionService.revealTriggered$.subscribe(triggered => {
         if (triggered && !this.countdownStarted) {
           this.startCountdown();
         }
-      })
-    );
-
-    this.subscriptions.push(
+      }),
       this.sessionService.resetVoting$.subscribe(reset => {
         if (reset) {
           this.countdownStarted = false;
@@ -756,92 +614,147 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           this.selectedCard = 0;
           this.participantVotes = {};
         }
+      }),
+      this.sessionService.userJoined$.subscribe(user => {
+        if (user && this.isHost && this.specificData.length > 0) {
+          setTimeout(() => this.broadcastUpdatedIssues(), 500);
+        }
       })
     );
 
     this.subscriptions.push(
-      this.sessionService.userJoined$.subscribe(user => {
+      this.localStorageSyncService.issuesUpdated$.subscribe(issues => {
+        if (issues && Array.isArray(issues) && issues.length > 0) {
+          this.specificData = [...issues];
+          this.storageService.storeTickets(this.specificData);
+          this.connectionStatus = 'connected';
+          if (!this.selectedTicket && issues.length > 0) {
+            const savedTicket = this.storageService.getSelectedTicket();
+            if (savedTicket) {
+              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
+              if (foundTicket) {
+                this.selectedTicket = foundTicket;
+              }
+            }
+          }
+        }
+      }),
+      this.localStorageSyncService.voteReceived$.subscribe(data => {
+        if (data && data.user && data.card !== undefined) {
+          this.participantVotes[data.user] = data.card;
+        }
+      }),
+      this.localStorageSyncService.ticketSelected$.subscribe(data => {
+        if (data && data.ticket) {
+          this.selectedTicket = data.ticket;
+          this.cardsPicked = false;
+          this.countdownFinished = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      }),
+      this.localStorageSyncService.revealTriggered$.subscribe(triggered => {
+        if (triggered && !this.countdownStarted) {
+          this.startCountdown();
+        }
+      }),
+      this.localStorageSyncService.resetVoting$.subscribe(reset => {
+        if (reset) {
+          this.countdownStarted = false;
+          this.countdownInProgress = false;
+          this.countdownFinished = false;
+          this.cardsPicked = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      }),
+      this.localStorageSyncService.userJoined$.subscribe(user => {
         if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => this.broadcastUpdatedIssues(), 100);
           setTimeout(() => this.broadcastUpdatedIssues(), 500);
-          setTimeout(() => this.broadcastUpdatedIssues(), 1000);
-          setTimeout(() => this.broadcastUpdatedIssues(), 2000);
-          setTimeout(() => this.broadcastUpdatedIssues(), 5000);
+        }
+      })
+    );
+
+    this.subscriptions.push(
+      this.sharedWorkerSyncService.issuesUpdated$.subscribe(issues => {
+        if (issues && Array.isArray(issues) && issues.length > 0) {
+          this.specificData = [...issues];
+          this.storageService.storeTickets(this.specificData);
+          this.connectionStatus = 'connected';
+          if (!this.selectedTicket && issues.length > 0) {
+            const savedTicket = this.storageService.getSelectedTicket();
+            if (savedTicket) {
+              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
+              if (foundTicket) {
+                this.selectedTicket = foundTicket;
+              }
+            }
+          }
+        }
+      }),
+      this.sharedWorkerSyncService.voteReceived$.subscribe(data => {
+        if (data && data.user && data.card !== undefined) {
+          this.participantVotes[data.user] = data.card;
+        }
+      }),
+      this.sharedWorkerSyncService.ticketSelected$.subscribe(data => {
+        if (data && data.ticket) {
+          this.selectedTicket = data.ticket;
+          this.cardsPicked = false;
+          this.countdownFinished = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      }),
+      this.sharedWorkerSyncService.revealTriggered$.subscribe(triggered => {
+        if (triggered && !this.countdownStarted) {
+          this.startCountdown();
+        }
+      }),
+      this.sharedWorkerSyncService.resetVoting$.subscribe(reset => {
+        if (reset) {
+          this.countdownStarted = false;
+          this.countdownInProgress = false;
+          this.countdownFinished = false;
+          this.cardsPicked = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      }),
+      this.sharedWorkerSyncService.userJoined$.subscribe(user => {
+        if (user && this.isHost && this.specificData.length > 0) {
+          setTimeout(() => this.broadcastUpdatedIssues(), 500);
+        }
+      }),
+      this.sharedWorkerSyncService.connectionStatus$.subscribe(status => {
+        if (status === 'connected') {
+          this.connectionStatus = 'connected';
         }
       })
     );
   }
 
-  async syncIssuesManually(): Promise<void> {
-    if (this.syncInProgress) return;
+  syncIssuesManually(): void {
+    this.connectionStatus = 'syncing';
 
-    this.syncInProgress = true;
-    const button = document.querySelector('.sync-btn');
-    const buttonText = button?.querySelector('span') || button;
-    const originalText = buttonText?.textContent || 'Sync Issues';
+    if (this.isHost && this.specificData.length > 0) {
+      this.broadcastUpdatedIssues();
+    } else {
+      this.sessionService.broadcastEvent('request_state', {
+        timestamp: new Date().getTime(),
+        needsIssues: true,
+        clientId: this.generateClientId()
+      });
 
-    try {
-      if (buttonText) {
-        buttonText.textContent = 'Syncing...';
-      }
+      this.localStorageSyncService.requestSync();
+      this.sharedWorkerSyncService.requestState();
 
-      this.connectionStatus = 'syncing';
-
-      if (this.isHost && this.specificData.length > 0) {
-        await this.broadcastIssuesWithRetry();
-      } else {
-        this.sessionService.broadcastEvent('request_state', {
-          timestamp: new Date().getTime(),
-          needsIssues: true,
-          manualSync: true,
-          clientId: this.generateClientId()
-        });
-        this.sessionService.broadcastEvent('client_joined', {
-          clientId: this.generateClientId(),
-          timestamp: new Date().getTime(),
-          needsFullSync: true,
-          manualRequest: true
-        });
-
-        this.sessionService.forceSyncAllClients();
-        await new Promise(resolve => {
-          let attempts = 0;
-          const checkInterval = setInterval(() => {
-            const currentTickets = this.storageService.getStoredTickets();
-            attempts++;
-
-            if (currentTickets.length > 0 || attempts >= 10) {
-              clearInterval(checkInterval);
-              if (currentTickets.length > 0) {
-                this.specificData = [...currentTickets];
-              }
-              resolve(true);
-            }
-          }, 500);
-        });
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      this.connectionStatus = 'connected';
-
-      if (buttonText) {
-        buttonText.textContent = 'Synced!';
-        setTimeout(() => {
-          buttonText.textContent = originalText;
-        }, 3000);
-      }
-    } catch (error: unknown) {
-      this.connectionStatus = 'disconnected';
-      if (buttonText) {
-        buttonText.textContent = 'Sync Failed';
-        setTimeout(() => {
-          buttonText.textContent = originalText;
-        }, 3000);
-      }
-    } finally {
-      this.syncInProgress = false;
+      this.sessionService.forceSyncAllClients();
     }
+
+    setTimeout(() => {
+      this.connectionStatus = 'connected';
+    }, 1000);
   }
 
   getConnectionStatusClass(): string {
