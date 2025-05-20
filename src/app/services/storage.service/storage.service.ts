@@ -1,13 +1,5 @@
 import { Injectable } from '@angular/core';
-
-interface JiraTicket {
-  Key: string;
-  Summary: string;
-  Status: string;
-  Assignee: string;
-  Description: string;
-  'Story point': number | string;
-}
+import { JiraTicket } from '../../../models';
 
 @Injectable({
   providedIn: 'root'
@@ -22,7 +14,7 @@ export class StorageService {
     try {
       localStorage.setItem(this.displayNameKey, displayName);
     } catch (error) {
-      console.error('Error storing display name', error);
+      // Handle error
     }
   }
 
@@ -30,7 +22,6 @@ export class StorageService {
     try {
       return localStorage.getItem(this.displayNameKey);
     } catch (error) {
-      console.error('Error getting display name', error);
       return null;
     }
   }
@@ -39,26 +30,24 @@ export class StorageService {
     try {
       localStorage.removeItem(this.displayNameKey);
     } catch (error) {
-      console.error('Error clearing display name', error);
+      // Handle error
     }
   }
 
   storeLastClickedCard(card: number): void {
     try {
-      const selectedCards: number[] = JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
-      selectedCards.push(card);
-      localStorage.setItem(this.selectedCardsKey, JSON.stringify(selectedCards));
+      localStorage.setItem(this.selectedCardsKey, JSON.stringify(card));
     } catch (error) {
-      console.error('Error storing last clicked card', error);
+      // Handle error
     }
   }
 
-  getStoredCards(): number[] {
+  getLastClickedCard(): number | null {
     try {
-      return JSON.parse(localStorage.getItem(this.selectedCardsKey) || '[]');
+      const card = localStorage.getItem(this.selectedCardsKey);
+      return card ? JSON.parse(card) : null;
     } catch (error) {
-      console.error('Error getting stored cards', error);
-      return [];
+      return null;
     }
   }
 
@@ -66,7 +55,7 @@ export class StorageService {
     try {
       localStorage.removeItem(this.selectedCardsKey);
     } catch (error) {
-      console.error('Error clearing stored cards', error);
+      // Handle error
     }
   }
 
@@ -87,13 +76,7 @@ export class StorageService {
 
       localStorage.setItem(this.ticketsKey, JSON.stringify(ticketsToStore));
     } catch (error) {
-      console.error('Error storing tickets', error);
-      try {
-        localStorage.removeItem(this.ticketsKey);
-        localStorage.setItem(this.ticketsKey, JSON.stringify([]));
-      } catch (fallbackError) {
-        console.error('Error in fallback storage', fallbackError);
-      }
+      // Handle error
     }
   }
 
@@ -112,23 +95,7 @@ export class StorageService {
 
       return parsed;
     } catch (error) {
-      console.error('Error getting stored tickets', error);
-      localStorage.removeItem(this.ticketsKey);
       return [];
-    }
-  }
-
-  updateTicketStoryPoints(ticketKey: string, storyPoints: number): void {
-    try {
-      const tickets = this.getStoredTickets();
-      const ticketIndex = tickets.findIndex(t => t.Key === ticketKey);
-
-      if (ticketIndex !== -1) {
-        tickets[ticketIndex]['Story point'] = storyPoints;
-        this.storeTickets(tickets);
-      }
-    } catch (error) {
-      console.error('Error updating ticket story points', error);
     }
   }
 
@@ -139,8 +106,7 @@ export class StorageService {
       }
       localStorage.setItem(this.selectedTicketKey, JSON.stringify(ticket));
     } catch (error) {
-      console.error('Error setting selected ticket', error);
-      localStorage.removeItem(this.selectedTicketKey);
+      // Handle error
     }
   }
 
@@ -152,8 +118,6 @@ export class StorageService {
       }
       return JSON.parse(ticket);
     } catch (error) {
-      console.error('Error getting selected ticket', error);
-      localStorage.removeItem(this.selectedTicketKey);
       return null;
     }
   }
@@ -162,7 +126,7 @@ export class StorageService {
     try {
       localStorage.removeItem(this.selectedTicketKey);
     } catch (error) {
-      console.error('Error clearing selected ticket', error);
+      // Handle error
     }
   }
 }

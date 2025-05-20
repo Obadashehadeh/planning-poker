@@ -104,7 +104,6 @@ function handleMessage(ws, clientId, message) {
         if (data.gameName) storeRoomState(roomId, 'gameName', data.gameName);
         if (data.gameType) storeRoomState(roomId, 'gameType', data.gameType);
 
-        // Broadcast to all clients to ensure everyone has the latest state
         broadcastToRoom(roomId, message, clientId);
       }
       break;
@@ -177,10 +176,8 @@ function joinRoom(ws, roomId, data, clientId, senderName, isHost) {
     timestamp: Date.now()
   }));
 
-  // Always send the current room state to the joining client
   sendRoomStateToClient(roomId, ws);
 
-  // If not host, also notify the host to send their state
   if (!clientInfo.isHost) {
     notifyHostForState(roomId, clientId);
   }
@@ -344,6 +341,7 @@ function assignNewHost(roomId) {
   }
 }
 
+// Check for dead connections and clean them up
 const HEARTBEAT_INTERVAL = 30000;
 
 function heartbeat() {
@@ -381,6 +379,26 @@ wss.on('connection', (ws) => {
     }
   });
 });
+
+// Room cleanup job - remove inactive rooms
+setInterval(() => {
+  const now = Date.now();
+  const timeout = 24 * 60 * 60 * 1000; // 24 hours
+
+  rooms.forEach((room, roomId) => {
+    let hasActiveClients = false;
+
+    room.clients.forEach((client) => {
+      if (now - client.joinedAt < timeout) {
+        hasActiveClients = true;
+      }
+    });
+
+    if (!hasActiveClients) {
+      rooms.delete(roomId);
+    }
+  });
+}, 60 * 60 * 1000); // Check every hour
 
 server.listen(port, () => {
   console.log(`WebSocket server is running on port ${port}`);

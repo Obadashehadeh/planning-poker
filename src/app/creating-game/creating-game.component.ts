@@ -1,9 +1,9 @@
-import {Component, HostListener, OnInit} from '@angular/core';
+import { Component, HostListener, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {FormControl, FormsModule, ReactiveFormsModule} from '@angular/forms';
-import {Router, RouterModule} from '@angular/router';
-import {GameService} from "../services/game.service/game.service";
-import {StorageService} from "../services/storage.service/storage.service";
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Router, RouterModule } from '@angular/router';
+import { GameService } from "../services/game.service/game.service";
+import { StorageService } from "../services/storage.service/storage.service";
 
 @Component({
   selector: 'app-creating-game',
@@ -36,7 +36,7 @@ export class CreatingGameComponent implements OnInit {
   ) {}
 
   ngOnInit() {
-    this.selectedGame = this.selectedGame === "" ? this.gameList[0]: this.selectedGame;
+    this.selectedGame = this.selectedGame === "" ? this.gameList[0] : this.selectedGame;
     this.votingSystem.setValue(this.selectedGame);
 
     const storedGameName = this.gameService.getGameName();

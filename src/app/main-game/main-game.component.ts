@@ -1,27 +1,17 @@
-import { Component, OnInit, OnChanges, SimpleChanges, Input, HostListener, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, ActivatedRoute } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import * as XLSX from 'xlsx';
+import { Subscription } from 'rxjs';
+
 import { StorageService } from '../services/storage.service/storage.service';
 import { InvitationService } from '../services/invitation.service/invitation.service';
 import { InvitationModalComponent } from '../invitation-modal/invitation-modal.component';
 import { SessionService } from '../services/session.service/session.service';
-import { ActivatedRoute } from '@angular/router';
-import { Subscription } from 'rxjs';
 import { GameService } from "../services/game.service/game.service";
-import { LocalStorageSyncService } from "../services/storage.service/localstorage-sync.service";
-import { SharedWorkerSyncService } from "../services/session.service/sharedworker-sync.service";
-import {WebSocketSyncService} from "../services/sync/websocket-sync.service";
-
-interface JiraTicket {
-  Key: string;
-  Summary: string;
-  Status: string;
-  Assignee: string;
-  Description: string;
-  'Story point': number | string;
-}
+import { SyncService } from "../services/sync/sync.service";
+import { JiraTicket, ConnectionStatus } from '../../models';
 
 @Component({
   selector: 'app-main-game',
@@ -30,8 +20,8 @@ interface JiraTicket {
   standalone: true,
   imports: [FormsModule, CommonModule, ReactiveFormsModule, InvitationModalComponent],
 })
-export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
-  @Input() selectedCard: number = 0;
+export class MainGameComponent implements OnInit, OnDestroy {
+  selectedCard: number = 0;
   gameName: string | null = '';
   gameType: string = '';
   cardList: number[] = [];
@@ -52,20 +42,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   fileUploadError: string = '';
   activeTab: string = 'unvoted';
   isHost: boolean = true;
-  connectionStatus: 'connected' | 'disconnected' | 'syncing' = 'connected';
+  connectionStatus: ConnectionStatus = 'connected';
   private subscriptions: Subscription[] = [];
   public participantVotes: { [key: string]: number } = {};
   public Object = Object;
-  private socketReconnectTimer: any = null;
 
   constructor(
     private gameService: GameService,
     private storageService: StorageService,
     private invitationService: InvitationService,
     private sessionService: SessionService,
-    private localStorageSyncService: LocalStorageSyncService,
-    private sharedWorkerSyncService: SharedWorkerSyncService,
-    private webSocketService: WebSocketSyncService,
+    private syncService: SyncService,
     private route: ActivatedRoute,
     private router: Router
   ) {
@@ -75,29 +62,17 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.debugSessionInfo();
     this.initializeComponent();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['selectedCard'] && !changes['selectedCard'].firstChange) {
-      this.storageService.storeLastClickedCard(this.selectedCard);
-    }
   }
 
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
-    this.webSocketService.disconnect();
-
-    if (this.socketReconnectTimer) {
-      clearTimeout(this.socketReconnectTimer);
-    }
+    this.syncService.disconnect();
   }
 
   private async initializeComponent(): Promise<void> {
     try {
       await this.sessionService.checkUrlForSession();
-
       this.sessionService.verifySessionId();
 
       this.gameType = this.gameService.getGameType() || this.getDefaultGameType();
@@ -120,62 +95,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
         })
       );
 
-
       this.loadSavedTickets();
       this.loadSelectedTicket();
-
-      this.subscribeToSessionEvents();
-
-      this.setupWebSocketConnection();
+      this.subscribeToSyncEvents();
 
       if (this.displayName) {
         this.submitDisplayName();
       }
 
       this.connectionStatus = 'connected';
-
-      setTimeout(() => {
-        if (this.isHost && this.specificData.length > 0) {
-          this.syncIssuesManually();
-        } else {
-          this.requestStateFromAllChannels();
-        }
-      }, 1500);
-
     } catch (error) {
       this.connectionStatus = 'disconnected';
       setTimeout(() => {
         this.initializeComponent();
       }, 2000);
     }
-  }
-  private requestStateFromAllChannels(): void {
-    this.connectionStatus = 'syncing';
-
-    this.sessionService.broadcastEvent('request_state', {
-      timestamp: new Date().getTime(),
-      needsIssues: true,
-      clientId: this.generateClientId()
-    });
-
-    this.localStorageSyncService.requestSync();
-
-    this.sharedWorkerSyncService.requestState();
-
-    if (this.webSocketService.isConnected()) {
-      this.webSocketService.requestFullState();
-    } else {
-      this.setupWebSocketConnection();
-      setTimeout(() => {
-        if (this.webSocketService.isConnected()) {
-          this.webSocketService.requestFullState();
-        }
-      }, 1000);
-    }
-
-    setTimeout(() => {
-      this.connectionStatus = 'connected';
-    }, 1500);
   }
 
   private loadSelectedTicket(): void {
@@ -191,39 +125,27 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.overlay = false;
       this.storageService.setDisplayName(this.displayName);
 
+      const sessionId = this.sessionService.getSessionId() || 'default';
+      this.syncService.connect(sessionId, this.displayName, this.isHost);
+
       const userData = {
         user: this.displayName,
         timestamp: new Date().getTime(),
-        clientId: this.generateClientId(),
         isHost: this.isHost
       };
 
-      this.sessionService.broadcastEvent('user_joined', userData);
-      this.localStorageSyncService.sendUserJoined(userData);
-      this.sharedWorkerSyncService.sendUserJoined(userData);
+      this.syncService.sendUserJoined(userData);
 
-      this.setupWebSocketConnection();
-
-      if (this.webSocketService.isConnected()) {
-        this.webSocketService.sendUserJoined(userData);
-      }
-
-      if (!this.isHost) {
+      if (this.isHost && this.specificData.length > 0) {
         setTimeout(() => {
-          this.sessionService.forceSyncAllClients();
-        }, 500);
+          this.syncIssuesManually();
+        }, 1000);
+      } else if (!this.isHost) {
+        setTimeout(() => {
+          this.syncService.requestFullState();
+        }, 1000);
       }
     }
-  }
-
-
-  private generateClientId(): string {
-    let clientId = localStorage.getItem('clientId');
-    if (!clientId) {
-      clientId = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-      localStorage.setItem('clientId', clientId);
-    }
-    return clientId;
   }
 
   toggleDropdown(event: MouseEvent): void {
@@ -241,33 +163,13 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
     this.selectedCard = card;
     this.cardsPicked = true;
-
     this.storageService.storeLastClickedCard(card);
 
-    this.sessionService.broadcastEvent('vote', {
-      card: card,
-      user: this.displayName,
-      timestamp: new Date().getTime()
-    });
-
-    this.localStorageSyncService.sendVote({
+    this.syncService.sendVote({
       card: card,
       user: this.displayName
     });
-
-    this.sharedWorkerSyncService.sendVote({
-      card: card,
-      user: this.displayName
-    });
-
-    if (this.webSocketService.isConnected()) {
-      this.webSocketService.sendVote({
-        card: card,
-        user: this.displayName
-      });
-    }
   }
-
 
   startCountdown(): void {
     if (!this.selectedTicket) {
@@ -279,18 +181,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.countdownInProgress = true;
     this.countdownValue = 3;
 
-    this.sessionService.broadcastEvent('reveal', {
-      ticketKey: this.selectedTicket.Key,
-      timestamp: new Date().getTime()
-    });
-
-    this.localStorageSyncService.sendReveal();
-    this.sharedWorkerSyncService.sendReveal();
-
-    if (this.webSocketService.isConnected()) {
-      this.webSocketService.sendReveal();
-    }
-
+    this.syncService.sendReveal();
     this.updateCountdown();
   }
 
@@ -318,81 +209,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.participantVotes = {};
 
     if (this.selectedTicket) {
-      this.sessionService.broadcastEvent('reset_voting', {
-        ticketKey: this.selectedTicket.Key,
-        timestamp: new Date().getTime()
-      });
-
-      this.localStorageSyncService.sendResetVoting();
-      this.sharedWorkerSyncService.sendResetVoting();
-
-      if (this.webSocketService.isConnected()) {
-        this.webSocketService.sendResetVoting();
-      }
-
+      this.syncService.sendResetVoting();
       this.updateTicketEstimate(this.selectedTicket, this.average);
       this.saveTickets();
-      this.broadcastUpdatedIssues();
+      this.syncIssuesManually();
     } else {
-      this.sessionService.broadcastEvent('reset_voting', {
-        timestamp: new Date().getTime()
-      });
-
-      this.localStorageSyncService.sendResetVoting();
-      this.sharedWorkerSyncService.sendResetVoting();
-
-      if (this.webSocketService.isConnected()) {
-        this.webSocketService.sendResetVoting();
-      }
-    }
-  }
-
-  private broadcastUpdatedIssues(): void {
-    if (this.specificData.length > 0) {
-      const timestamp = new Date().getTime();
-      const issuesClone = this.specificData.map(issue => ({ ...issue }));
-
-      this.sessionService.broadcastEvent('update_issues', {
-        issues: issuesClone,
-        timestamp: timestamp,
-        forceUpdate: true
-      });
-
-      this.sessionService.broadcastEvent('full_state', {
-        gameName: this.gameService.getGameName(),
-        gameType: this.gameService.getGameType(),
-        issues: issuesClone,
-        selectedTicket: this.selectedTicket,
-        timestamp: timestamp,
-        forceUpdate: true
-      });
-
-      this.localStorageSyncService.sendIssuesUpdate(issuesClone);
-
-      this.sharedWorkerSyncService.sendIssuesUpdate(issuesClone);
-
-      if (this.webSocketService.isConnected()) {
-        const fullState = {
-          issues: issuesClone,
-          selectedTicket: this.selectedTicket,
-          gameName: this.gameService.getGameName(),
-          gameType: this.gameService.getGameType()
-        };
-
-        this.webSocketService.sendFullState();
-
-        this.webSocketService.sendIssuesUpdate(issuesClone);
-      } else {
-        this.setupWebSocketConnection();
-
-        setTimeout(() => {
-          if (this.webSocketService.isConnected()) {
-            this.webSocketService.sendIssuesUpdate(issuesClone);
-          }
-        }, 1000);
-      }
-
-      this.sessionService.forceSyncAllClients();
+      this.syncService.sendResetVoting();
     }
   }
 
@@ -419,44 +241,21 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   invitePlayer(): void {
-    // Verify session ID
     const sessionId = this.sessionService.getSessionId();
 
     if (!sessionId) {
-      console.error('No session ID available for invitation');
       alert('Unable to create invitation link: No session ID available. Please refresh the page and try again.');
       return;
     }
 
-    console.log(`Creating invitation with session ID: ${sessionId}`);
-
-    // Open invitation modal
     this.invitationService.triggerInvitation();
     this.isOpenInvitationModal = true;
-
-    // Debug session info
-    this.debugSessionInfo();
   }
 
   toggleSidebar(): void {
     this.isSidebarOpen = !this.isSidebarOpen;
   }
-  private handleSessionJoinError(error: any): void {
 
-    this.connectionStatus = 'disconnected';
-
-    this.sessionService.resetSession();
-
-    setTimeout(() => {
-      this.connectionStatus = 'syncing';
-
-      this.setupWebSocketConnection();
-
-      setTimeout(() => {
-        this.connectionStatus = 'connected';
-      }, 1000);
-    }, 1000);
-  }
   setActiveTab(tab: string): void {
     this.activeTab = tab;
   }
@@ -499,16 +298,6 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       const data = await this.readExcelFile(file);
       await this.processUploadedData(data);
-
-      // After processing, ensure WebSocket connection is established
-      if (!this.webSocketService.isConnected()) {
-        this.setupWebSocketConnection();
-        // Wait for connection to establish
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
-      // Broadcast issues to all clients with explicit sync request
-      this.broadcastUpdatedIssues();
       this.syncIssuesManually();
 
       if (fileButton) {
@@ -598,16 +387,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     }));
 
     this.specificData.sort((a, b) => a.Key.localeCompare(b.Key));
-
     this.saveTickets();
-
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    this.broadcastUpdatedIssues();
-
-    setTimeout(() => {
-      this.syncIssuesManually();
-    }, 1000);
 
     if (window.innerWidth < 768) {
       setTimeout(() => this.isSidebarOpen = false, 1000);
@@ -643,19 +423,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.selectedCard = 0;
     this.participantVotes = {};
 
-    this.sessionService.broadcastEvent('select_ticket', {
-      ticket: this.selectedTicket,
-      ticketKey: this.selectedTicket?.Key,
-      ticketSummary: this.selectedTicket?.Summary,
-      timestamp: new Date().getTime()
-    });
-
-    this.localStorageSyncService.sendTicketSelection(this.selectedTicket);
-    this.sharedWorkerSyncService.sendTicketSelection(this.selectedTicket);
-
-    if (this.webSocketService.isConnected()) {
-      this.webSocketService.sendTicketSelection(this.selectedTicket);
-    }
+    this.syncService.sendTicketSelection(ticket);
 
     if (window.innerWidth < 768) {
       this.isSidebarOpen = false;
@@ -721,66 +489,14 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     }
   }
 
-  private subscribeToSessionEvents(): void {
+  private subscribeToSyncEvents(): void {
     this.subscriptions.push(
-      this.sessionService.issuesUpdated$.subscribe(issues => {
+      this.syncService.issuesUpdated$.subscribe(issues => {
         if (issues && Array.isArray(issues) && issues.length > 0) {
           this.specificData = [...issues];
           this.storageService.storeTickets(this.specificData);
           this.connectionStatus = 'connected';
-          if (!this.selectedTicket && issues.length > 0) {
-            const savedTicket = this.storageService.getSelectedTicket();
-            if (savedTicket) {
-              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
-              if (foundTicket) {
-                this.selectedTicket = foundTicket;
-              }
-            }
-          }
-        }
-      }),
-      this.sessionService.ticketSelected$.subscribe(data => {
-        if (data && data.ticket) {
-          this.selectedTicket = data.ticket;
-          this.cardsPicked = false;
-          this.countdownFinished = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-      this.sessionService.voteReceived$.subscribe(data => {
-        if (data && data.user && data.card !== undefined) {
-          this.participantVotes[data.user] = data.card;
-        }
-      }),
-      this.sessionService.revealTriggered$.subscribe(triggered => {
-        if (triggered && !this.countdownStarted) {
-          this.startCountdown();
-        }
-      }),
-      this.sessionService.resetVoting$.subscribe(reset => {
-        if (reset) {
-          this.countdownStarted = false;
-          this.countdownInProgress = false;
-          this.countdownFinished = false;
-          this.cardsPicked = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-      this.sessionService.userJoined$.subscribe(user => {
-        if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => this.broadcastUpdatedIssues(), 500);
-        }
-      })
-    );
 
-    this.subscriptions.push(
-      this.localStorageSyncService.issuesUpdated$.subscribe(issues => {
-        if (issues && Array.isArray(issues) && issues.length > 0) {
-          this.specificData = [...issues];
-          this.storageService.storeTickets(this.specificData);
-          this.connectionStatus = 'connected';
           if (!this.selectedTicket && issues.length > 0) {
             const savedTicket = this.storageService.getSelectedTicket();
             if (savedTicket) {
@@ -792,79 +508,31 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           }
         }
       }),
-      this.localStorageSyncService.voteReceived$.subscribe(data => {
-        if (data && data.user && data.card !== undefined) {
-          this.participantVotes[data.user] = data.card;
-        }
-      }),
-      this.localStorageSyncService.ticketSelected$.subscribe(data => {
-        if (data && data.ticket) {
-          this.selectedTicket = data.ticket;
-          this.cardsPicked = false;
-          this.countdownFinished = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-      this.localStorageSyncService.revealTriggered$.subscribe(triggered => {
-        if (triggered && !this.countdownStarted) {
-          this.startCountdown();
-        }
-      }),
-      this.localStorageSyncService.resetVoting$.subscribe(reset => {
-        if (reset) {
-          this.countdownStarted = false;
-          this.countdownInProgress = false;
-          this.countdownFinished = false;
-          this.cardsPicked = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-      this.localStorageSyncService.userJoined$.subscribe(user => {
-        if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => this.broadcastUpdatedIssues(), 500);
-        }
-      })
-    );
 
-    this.subscriptions.push(
-      this.sharedWorkerSyncService.issuesUpdated$.subscribe(issues => {
-        if (issues && Array.isArray(issues) && issues.length > 0) {
-          this.specificData = [...issues];
-          this.storageService.storeTickets(this.specificData);
-          this.connectionStatus = 'connected';
-          if (!this.selectedTicket && issues.length > 0) {
-            const savedTicket = this.storageService.getSelectedTicket();
-            if (savedTicket) {
-              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
-              if (foundTicket) {
-                this.selectedTicket = foundTicket;
-              }
-            }
-          }
-        }
-      }),
-      this.sharedWorkerSyncService.voteReceived$.subscribe(data => {
-        if (data && data.user && data.card !== undefined) {
-          this.participantVotes[data.user] = data.card;
-        }
-      }),
-      this.sharedWorkerSyncService.ticketSelected$.subscribe(data => {
+      this.syncService.ticketSelected$.subscribe(data => {
         if (data && data.ticket) {
           this.selectedTicket = data.ticket;
+          this.storageService.setSelectedTicket(data.ticket);
           this.cardsPicked = false;
           this.countdownFinished = false;
           this.selectedCard = 0;
           this.participantVotes = {};
         }
       }),
-      this.sharedWorkerSyncService.revealTriggered$.subscribe(triggered => {
+
+      this.syncService.voteReceived$.subscribe(data => {
+        if (data && data.user && data.card !== undefined) {
+          this.participantVotes[data.user] = data.card;
+        }
+      }),
+
+      this.syncService.revealTriggered$.subscribe(triggered => {
         if (triggered && !this.countdownStarted) {
           this.startCountdown();
         }
       }),
-      this.sharedWorkerSyncService.resetVoting$.subscribe(reset => {
+
+      this.syncService.resetVoting$.subscribe(reset => {
         if (reset) {
           this.countdownStarted = false;
           this.countdownInProgress = false;
@@ -874,14 +542,18 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
           this.participantVotes = {};
         }
       }),
-      this.sharedWorkerSyncService.userJoined$.subscribe(user => {
+
+      this.syncService.userJoined$.subscribe(user => {
         if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => this.broadcastUpdatedIssues(), 500);
+          setTimeout(() => this.syncIssuesManually(), 500);
         }
       }),
-      this.sharedWorkerSyncService.connectionStatus$.subscribe(status => {
-        if (status === 'connected') {
-          this.connectionStatus = 'connected';
+
+      this.syncService.connectionStatus$.subscribe(status => {
+        this.connectionStatus = status === 'connecting' ? 'syncing' : status;
+
+        if (status === 'connected' && this.isHost && this.specificData.length > 0) {
+          setTimeout(() => this.syncIssuesManually(), 1000);
         }
       })
     );
@@ -891,40 +563,16 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.connectionStatus = 'syncing';
 
     if (this.isHost && this.specificData.length > 0) {
-      // If host, broadcast the issues
-      this.broadcastUpdatedIssues();
-
-      // Also send a direct full state via WebSocket
-      if (this.webSocketService.isConnected()) {
-        this.webSocketService.sendFullState();
-      }
+      this.syncService.sendIssuesUpdate(this.specificData);
+      this.syncService.sendFullState();
     } else {
-      // If client, request state from all channels
-      this.sessionService.broadcastEvent('request_state', {
-        timestamp: new Date().getTime(),
-        needsIssues: true,
-        clientId: this.generateClientId()
-      });
-
-      this.localStorageSyncService.requestSync();
-      this.sharedWorkerSyncService.requestState();
-
-      // Request state via WebSocket
-      if (this.webSocketService.isConnected()) {
-        this.webSocketService.requestFullState();
-      } else {
-        this.setupWebSocketConnection();
-      }
-
-      this.sessionService.forceSyncAllClients();
+      this.syncService.requestFullState();
     }
 
-    // Reset status after a delay
     setTimeout(() => {
       this.connectionStatus = 'connected';
-    }, 1500);
+    }, 1000);
   }
-
 
   getConnectionStatusClass(): string {
     switch (this.connectionStatus) {
@@ -939,181 +587,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
     this.connectionStatus = 'syncing';
 
     if (this.displayNameEntered && this.displayName) {
-      const sessionId = this.sessionService.getSessionId() || 'default-room';
-      this.webSocketService.connect(sessionId, this.displayName, this.isHost);
+      const sessionId = this.sessionService.getSessionId() || 'default';
+      this.syncService.connect(sessionId, this.displayName, this.isHost);
     }
 
-    this.syncIssuesManually();
-  }
-  private setupWebSocketConnection(): void {
-    if (this.socketReconnectTimer) {
-      clearTimeout(this.socketReconnectTimer);
-      this.socketReconnectTimer = null;
-    }
-
-    if (this.displayNameEntered && this.displayName) {
-      const sessionId = this.sessionService.getSessionId() || 'default-room';
-
-      // Connect to WebSocket
-      this.webSocketService.connect(sessionId, this.displayName, this.isHost);
-
-      // When connection is established, broadcast full state if host
-      this.subscriptions.push(
-        this.webSocketService.connectionStatus$.subscribe(status => {
-          if (status === 'connected') {
-            this.connectionStatus = 'connected';
-
-            // If host and we have data, broadcast it to everyone
-            if (this.isHost && this.specificData.length > 0) {
-              setTimeout(() => {
-                this.broadcastUpdatedIssues();
-
-                // Force sync to ensure data is shared
-                this.syncIssuesManually();
-              }, 1000);
-            }
-          } else if (status === 'disconnected') {
-            if (this.connectionStatus !== 'disconnected') {
-              this.connectionStatus = 'disconnected';
-              this.socketReconnectTimer = setTimeout(() => {
-                this.setupWebSocketConnection();
-              }, 5000);
-            }
-          }
-        })
-      );
-    }
-  }
-  private subscribeToWebSocketEvents(): void {
-    this.subscriptions.push(
-      this.webSocketService.issuesUpdated$.subscribe(issues => {
-        if (issues && Array.isArray(issues) && issues.length > 0) {
-          // Update local data
-          this.specificData = [...issues];
-          this.storageService.storeTickets(this.specificData);
-
-          // Update UI state
-          this.connectionStatus = 'connected';
-
-          // Check if we need to update selected ticket
-          if (!this.selectedTicket && issues.length > 0) {
-            const savedTicket = this.storageService.getSelectedTicket();
-            if (savedTicket) {
-              const foundTicket = issues.find(issue => issue.Key === savedTicket.Key);
-              if (foundTicket) {
-                this.selectedTicket = foundTicket;
-              }
-            }
-          }
-        }
-      }),
-
-      this.webSocketService.ticketSelected$.subscribe(data => {
-        if (data && data.ticket) {
-          this.selectedTicket = data.ticket;
-          this.storageService.setSelectedTicket(data.ticket);
-          this.cardsPicked = false;
-          this.countdownFinished = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-
-      this.webSocketService.voteReceived$.subscribe(data => {
-        if (data && data.user && data.card !== undefined) {
-          this.participantVotes[data.user] = data.card;
-        }
-      }),
-
-      this.webSocketService.revealTriggered$.subscribe(triggered => {
-        if (triggered && !this.countdownStarted) {
-          this.startCountdown();
-        }
-      }),
-
-      this.webSocketService.resetVoting$.subscribe(reset => {
-        if (reset) {
-          this.countdownStarted = false;
-          this.countdownInProgress = false;
-          this.countdownFinished = false;
-          this.cardsPicked = false;
-          this.selectedCard = 0;
-          this.participantVotes = {};
-        }
-      }),
-
-      this.webSocketService.userJoined$.subscribe(user => {
-        if (user && this.isHost && this.specificData.length > 0) {
-          setTimeout(() => {
-            this.broadcastUpdatedIssues();
-          }, 800);
-        }
-      })
-    );
-  }
-  private debugSessionInfo(): void {
-    // Get query parameters from URL
-    const url = new URL(window.location.href);
-    const sessionParam = url.searchParams.get('session');
-    const gameParam = url.searchParams.get('game');
-    const typeParam = url.searchParams.get('type');
-
-    // Get stored session information
-    const storedSessionId = localStorage.getItem('sessionId');
-    const serviceSessionId = this.sessionService.getSessionId();
-
-    // Log all information
-    console.group('Session Debug Information');
-    console.log('URL Parameters:');
-    console.log('- session:', sessionParam);
-    console.log('- game:', gameParam);
-    console.log('- type:', typeParam);
-    console.log('Stored Session ID:', storedSessionId);
-    console.log('Service Session ID:', serviceSessionId);
-    console.log('Is Host:', this.sessionService.isSessionHost());
-    console.log('Connection Status:', this.connectionStatus);
-    console.log('WebSocket Connected:', this.webSocketService.isConnected());
-    console.groupEnd();
-
-    // Check for mismatches
-    if (sessionParam && storedSessionId !== sessionParam) {
-      console.warn('Session ID mismatch between URL and localStorage');
-    }
-
-    if (serviceSessionId !== storedSessionId) {
-      console.warn('Session ID mismatch between service and localStorage');
-    }
-  }
-  private forceUpdateSessionFromUrl(): void {
-    const url = new URL(window.location.href);
-    const sessionParam = url.searchParams.get('session');
-
-    if (sessionParam) {
-      console.log(`Forcing session update to: ${sessionParam}`);
-
-      // Update localStorage
-      localStorage.setItem('sessionId', sessionParam);
-
-      // Force service to update
-      this.sessionService.checkUrlForSession().then(() => {
-        console.log('Session updated from URL');
-
-        // Reconnect WebSocket with new session ID
-        this.setupWebSocketConnection();
-
-        // Request state update
-        setTimeout(() => {
-          this.syncIssuesManually();
-        }, 1000);
-      });
-    } else {
-      console.warn('No session parameter in URL to update from');
-    }
-  }
-  public importIssues(event: any): void {
-    this.onFileChange(event);
-
-    console.log('Issues imported. Current session ID:', this.sessionService.getSessionId());
-    console.log('WebSocket room ID:', this.webSocketService.getCurrentRoomId());
+    setTimeout(() => {
+      this.syncIssuesManually();
+    }, 1000);
   }
 }

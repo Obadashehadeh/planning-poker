@@ -94,22 +94,13 @@ export class InvitationModalComponent implements OnInit {
     const baseUrl = environment.baseUrl;
     const gameName = this.gameService.getGameName() || 'planning-poker-game';
     const gameType = this.gameService.getGameType();
-
-    // Get the session ID from the SessionService and ensure it's not empty
     const sessionId = this.sessionService.getSessionId();
 
     if (!sessionId) {
-      console.error('No session ID available for invitation link');
       this.invitationUrl = 'Error: No session ID available. Please try again.';
       return;
     }
 
-    console.log(`Creating invitation link with session ID: ${sessionId}`);
-
-    // Create URL with game name, type, and session ID
     this.invitationUrl = `${baseUrl}/main-game?game=${encodeURIComponent(gameName)}&type=${encodeURIComponent(gameType)}&session=${encodeURIComponent(sessionId)}`;
-
-    // Log the generated URL for debugging
-    console.log(`Generated invitation URL: ${this.invitationUrl}`);
   }
 }
