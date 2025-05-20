@@ -56,6 +56,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   private subscriptions: Subscription[] = [];
   public participantVotes: { [key: string]: number } = {};
   public Object = Object;
+  private socketReconnectTimer: any = null;
 
   constructor(
     private gameService: GameService,
@@ -86,6 +87,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
     this.webSocketService.disconnect();
+
+    if (this.socketReconnectTimer) {
+      clearTimeout(this.socketReconnectTimer);
+    }
   }
 
   private async initializeComponent(): Promise<void> {
@@ -116,6 +121,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.loadSelectedTicket();
 
       this.subscribeToSessionEvents();
+      this.setupWebSocketConnection();
 
       if (this.displayName) {
         this.submitDisplayName();
@@ -154,6 +160,12 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.localStorageSyncService.sendUserJoined(userData);
       this.sharedWorkerSyncService.sendUserJoined(userData);
 
+      this.setupWebSocketConnection();
+
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.sendUserJoined(userData);
+      }
+
       if (!this.isHost) {
         setTimeout(() => {
           this.sessionService.forceSyncAllClients();
@@ -161,6 +173,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       }
     }
   }
+
 
   private generateClientId(): string {
     let clientId = localStorage.getItem('clientId');
@@ -204,7 +217,15 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       card: card,
       user: this.displayName
     });
+
+    if (this.webSocketService.isConnected()) {
+      this.webSocketService.sendVote({
+        card: card,
+        user: this.displayName
+      });
+    }
   }
+
 
   startCountdown(): void {
     if (!this.selectedTicket) {
@@ -223,6 +244,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
     this.localStorageSyncService.sendReveal();
     this.sharedWorkerSyncService.sendReveal();
+
+    if (this.webSocketService.isConnected()) {
+      this.webSocketService.sendReveal();
+    }
 
     this.updateCountdown();
   }
@@ -259,6 +284,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.localStorageSyncService.sendResetVoting();
       this.sharedWorkerSyncService.sendResetVoting();
 
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.sendResetVoting();
+      }
+
       this.updateTicketEstimate(this.selectedTicket, this.average);
       this.saveTickets();
       this.broadcastUpdatedIssues();
@@ -269,6 +298,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       this.localStorageSyncService.sendResetVoting();
       this.sharedWorkerSyncService.sendResetVoting();
+
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.sendResetVoting();
+      }
     }
   }
 
@@ -294,6 +327,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       this.localStorageSyncService.sendIssuesUpdate(issuesClone);
       this.sharedWorkerSyncService.sendIssuesUpdate(issuesClone);
+
+      if (this.webSocketService.isConnected()) {
+        this.webSocketService.sendIssuesUpdate(issuesClone);
+      }
 
       this.sessionService.forceSyncAllClients();
     }
@@ -506,6 +543,10 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
     this.localStorageSyncService.sendTicketSelection(this.selectedTicket);
     this.sharedWorkerSyncService.sendTicketSelection(this.selectedTicket);
+
+    if (this.webSocketService.isConnected()) {
+      this.webSocketService.sendTicketSelection(this.selectedTicket);
+    }
 
     if (window.innerWidth < 768) {
       this.isSidebarOpen = false;
@@ -751,9 +792,13 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
       this.localStorageSyncService.requestSync();
       this.sharedWorkerSyncService.requestState();
+
       if (this.webSocketService.isConnected()) {
         this.webSocketService.requestFullState();
+      } else {
+        this.setupWebSocketConnection();
       }
+
       this.sessionService.forceSyncAllClients();
     }
 
@@ -761,6 +806,7 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
       this.connectionStatus = 'connected';
     }, 1000);
   }
+
 
   getConnectionStatusClass(): string {
     switch (this.connectionStatus) {
@@ -773,13 +819,83 @@ export class MainGameComponent implements OnInit, OnChanges, OnDestroy {
 
   retryConnection(): void {
     this.connectionStatus = 'syncing';
+
     if (this.displayNameEntered && this.displayName) {
-      this.webSocketService.connect(
-        this.sessionService.getSessionId() || 'default-room',
-        this.displayName,
-        this.isHost
-      );
+      const sessionId = this.sessionService.getSessionId() || 'default-room';
+      this.webSocketService.connect(sessionId, this.displayName, this.isHost);
     }
-    this.initializeComponent();
+
+    this.syncIssuesManually();
+  }
+  private setupWebSocketConnection(): void {
+    if (this.socketReconnectTimer) {
+      clearTimeout(this.socketReconnectTimer);
+      this.socketReconnectTimer = null;
+    }
+
+    if (this.displayNameEntered && this.displayName) {
+      const sessionId = this.sessionService.getSessionId() || 'default-room';
+      this.webSocketService.connect(sessionId, this.displayName, this.isHost);
+    }
+
+    this.subscriptions.push(
+      this.webSocketService.connectionStatus$.subscribe(status => {
+        if (status === 'connected') {
+          this.connectionStatus = 'connected';
+          if (this.isHost && this.specificData.length > 0) {
+            setTimeout(() => {
+              this.broadcastUpdatedIssues();
+            }, 1000);
+          }
+        } else if (status === 'disconnected') {
+          if (this.connectionStatus !== 'disconnected') {
+            this.connectionStatus = 'disconnected';
+            this.socketReconnectTimer = setTimeout(() => {
+              this.setupWebSocketConnection();
+            }, 5000);
+          }
+        }
+      }),
+
+      this.webSocketService.issuesUpdated$.subscribe(issues => {
+        if (issues && Array.isArray(issues) && issues.length > 0) {
+          this.specificData = [...issues];
+          this.storageService.storeTickets(this.specificData);
+        }
+      }),
+
+      this.webSocketService.ticketSelected$.subscribe(data => {
+        if (data && data.ticket) {
+          this.selectedTicket = data.ticket;
+          this.cardsPicked = false;
+          this.countdownFinished = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      }),
+
+      this.webSocketService.voteReceived$.subscribe(data => {
+        if (data && data.user && data.card !== undefined) {
+          this.participantVotes[data.user] = data.card;
+        }
+      }),
+
+      this.webSocketService.revealTriggered$.subscribe(triggered => {
+        if (triggered && !this.countdownStarted) {
+          this.startCountdown();
+        }
+      }),
+
+      this.webSocketService.resetVoting$.subscribe(reset => {
+        if (reset) {
+          this.countdownStarted = false;
+          this.countdownInProgress = false;
+          this.countdownFinished = false;
+          this.cardsPicked = false;
+          this.selectedCard = 0;
+          this.participantVotes = {};
+        }
+      })
+    );
   }
 }

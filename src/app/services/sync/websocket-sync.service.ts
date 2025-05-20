@@ -1,5 +1,3 @@
-// src/app/services/sync/websocket-sync.service.ts
-
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { environment } from '../../../environments/environments';
@@ -13,6 +11,13 @@ interface JiraTicket {
   'Story point': number | string;
 }
 
+interface RoomState {
+  issues: JiraTicket[];
+  selectedTicket: JiraTicket | null;
+  gameName: string;
+  gameType: string;
+}
+
 @Injectable({
   providedIn: 'root'
 })
@@ -24,9 +29,10 @@ export class WebSocketSyncService {
   private roomId: string | null = null;
   private isHost = false;
   private displayName = '';
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
 
-  // Observables for real-time updates
-  private issuesUpdated = new BehaviorSubject<any[]>([]);
+  private issuesUpdated = new BehaviorSubject<JiraTicket[]>([]);
   private voteReceived = new BehaviorSubject<any>(null);
   private ticketSelected = new BehaviorSubject<any>(null);
   private revealTriggered = new BehaviorSubject<boolean>(false);
@@ -38,8 +44,7 @@ export class WebSocketSyncService {
     this.clientId = this.generateClientId();
   }
 
-  // Public observables
-  public get issuesUpdated$(): Observable<any[]> {
+  public get issuesUpdated$(): Observable<JiraTicket[]> {
     return this.issuesUpdated.asObservable();
   }
 
@@ -68,26 +73,33 @@ export class WebSocketSyncService {
   }
 
   public connect(roomId: string, displayName: string, isHost: boolean = false): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      return;
+    }
+
     this.roomId = roomId;
     this.isHost = isHost;
     this.displayName = displayName;
+    this.reconnectAttempts = 0;
     this.connectToWebSocket();
   }
 
   private connectToWebSocket(): void {
     this.connectionStatus.next('connecting');
 
-    // Use wss:// for production and secure environments
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Dynamically determine server address (you'll need to set this up separately)
-    const serverUrl = `${protocol}//${window.location.hostname}:3000`;
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
+
+    const serverUrl = environment.websocketUrl;
 
     try {
       this.socket = new WebSocket(serverUrl);
 
       this.socket.onopen = () => {
-        console.log('WebSocket connection established');
         this.connectionStatus.next('connected');
+        this.reconnectAttempts = 0;
         this.startPingInterval();
         this.joinRoom();
       };
@@ -97,18 +109,15 @@ export class WebSocketSyncService {
       };
 
       this.socket.onclose = () => {
-        console.log('WebSocket connection closed');
         this.connectionStatus.next('disconnected');
         this.clearIntervals();
         this.scheduleReconnect();
       };
 
-      this.socket.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      this.socket.onerror = () => {
         this.connectionStatus.next('disconnected');
       };
     } catch (error) {
-      console.error('Error creating WebSocket:', error);
       this.connectionStatus.next('disconnected');
       this.scheduleReconnect();
     }
@@ -118,7 +127,6 @@ export class WebSocketSyncService {
     try {
       const message = JSON.parse(data);
 
-      // Ignore messages from self
       if (message.senderId === this.clientId) {
         return;
       }
@@ -133,6 +141,7 @@ export class WebSocketSyncService {
           setTimeout(() => this.revealTriggered.next(false), 100);
           break;
 
+        case 'select_ticket':
         case 'ticket_selected':
           this.ticketSelected.next(message.data);
           break;
@@ -158,6 +167,12 @@ export class WebSocketSyncService {
           }
           break;
 
+        case 'room_joined':
+          if (!this.isHost) {
+            this.requestFullStateInternal();
+          }
+          break;
+
         case 'full_state':
           if (!this.isHost && message.data) {
             if (message.data.issues) {
@@ -168,19 +183,14 @@ export class WebSocketSyncService {
             }
           }
           break;
-
-        case 'pong':
-          // Handle pong response
-          break;
       }
     } catch (error) {
-      console.error('Error parsing message:', error);
+      // Silent error handling
     }
   }
 
   private sendMessage(type: string, data: any): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      console.warn('Cannot send message, socket not open');
       return;
     }
 
@@ -195,27 +205,28 @@ export class WebSocketSyncService {
     };
 
     try {
-      this.socket.send(JSON.stringify(message));
+      const messageStr = JSON.stringify(message);
+      this.socket.send(messageStr);
     } catch (error) {
-      console.error('Error sending message:', error);
       this.scheduleReconnect();
     }
   }
 
   private joinRoom(): void {
     if (!this.roomId) {
-      console.error('No room ID provided');
       return;
     }
 
     this.sendMessage('join_room', {
       displayName: this.displayName,
-      isHost: this.isHost
+      isHost: this.isHost,
+      needsFullState: !this.isHost
     });
 
-    // If not host, request current state
     if (!this.isHost) {
-      this.requestFullStateInternal();
+      setTimeout(() => {
+        this.requestFullStateInternal();
+      }, 1000);
     }
   }
 
@@ -225,7 +236,7 @@ export class WebSocketSyncService {
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
         this.sendMessage('ping', { timestamp: new Date().getTime() });
       }
-    }, 30000); // 30 seconds
+    }, 30000);
   }
 
   private clearIntervals(): void {
@@ -240,42 +251,50 @@ export class WebSocketSyncService {
   }
 
   private scheduleReconnect(): void {
-    if (!this.reconnectInterval) {
-      this.reconnectInterval = setInterval(() => {
-        console.log('Attempting to reconnect...');
+    if (this.reconnectInterval) {
+      clearInterval(this.reconnectInterval);
+    }
+
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000);
+
+      this.reconnectInterval = setTimeout(() => {
         this.connectToWebSocket();
-      }, 5000); // Attempt reconnect every 5 seconds
+      }, delay);
     }
   }
 
-  // Private method used internally
   private requestFullStateInternal(): void {
     this.sendMessage('request_state', {
-      needsFullState: true
+      needsFullState: true,
+      clientId: this.clientId
     });
   }
 
-  // Public method that can be called from components
   public requestFullState(): void {
     this.requestFullStateInternal();
   }
 
   private sendFullState(): void {
-    // This would be implemented by the host to send current game state
-    // You'll need to update this to include the actual game state data from your storage services
-    this.sendMessage('full_state', {
-      // Get this data from your storage services
+    // This method should be implemented to get data from other services
+    // For now, we'll create an empty implementation that satisfies TypeScript
+
+    // In a real implementation, you would get this data from your storage or game services
+    const state: RoomState = {
       issues: [],
       selectedTicket: null,
       gameName: '',
       gameType: ''
-    });
+    };
+
+    this.sendMessage('full_state', state);
   }
 
-  // Public methods for sending updates
-  public sendIssuesUpdate(issues: any[]): void {
+  public sendIssuesUpdate(issues: JiraTicket[]): void {
     this.sendMessage('update_issues', {
-      issues
+      issues,
+      forceUpdate: true
     });
   }
 
@@ -284,8 +303,10 @@ export class WebSocketSyncService {
   }
 
   public sendTicketSelection(ticket: JiraTicket): void {
-    this.sendMessage('ticket_selected', {
-      ticket
+    this.sendMessage('select_ticket', {
+      ticket,
+      ticketKey: ticket.Key,
+      ticketSummary: ticket.Summary
     });
   }
 

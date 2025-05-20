@@ -1,4 +1,6 @@
 export const environment = {
   production: false,
-  baseUrl: 'http://192.168.2.173:4200'
+  baseUrl: window.location.origin,
+  websocketUrl: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//` +
+    `${window.location.hostname}:3000`
 };
